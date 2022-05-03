@@ -17,6 +17,8 @@ package v1alpha1
 import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 // ShadowPodSpec defines the desired state of ShadowPod.
@@ -46,4 +48,10 @@ type ShadowPodList struct {
 
 func init() {
 	SchemeBuilder.Register(&ShadowPod{}, &ShadowPodList{})
+}
+
+func (r *ShadowPod) SetupWebhookWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewWebhookManagedBy(mgr).
+		For(r).
+		Complete()
 }
