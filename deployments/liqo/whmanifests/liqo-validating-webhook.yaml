@@ -1,0 +1,29 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  annotations:
+    cert-manager.io/inject-ca-from: webhook-system/webhook-serving-cert
+  name: webhook-validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-webhook-service
+      namespace: webhook-system
+      path: /validate-shadowpod
+  failurePolicy: Fail
+  name: vshadowpod.kb.io
+  rules:
+  - apiGroups:
+    - thesis.cnndev.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    - DELETE
+    resources:
+    - shadowpods
+  sideEffects: None

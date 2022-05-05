@@ -1,0 +1,32 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: webhook-manager-role
+rules:
+- apiGroups:
+  - thesis.cnndev.io
+  resources:
+  - shadowpods
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - thesis.cnndev.io
+  resources:
+  - shadowpods/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - thesis.cnndev.io
+  resources:
+  - shadowpods/status
+  verbs:
+  - get
+  - patch
+  - update

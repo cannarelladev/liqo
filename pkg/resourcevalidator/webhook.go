@@ -19,23 +19,23 @@ import (
 	"fmt"
 	"net/http"
 
-	// "github.com/onsi/ginkgo/types"
+	// "github.com/onsi/ginkgo/types".
 	admissionv1 "k8s.io/api/admission/v1"
-	// "k8s.io/client-go/kubernetes"
-	// "k8s.io/klog/v2"
-	// "k8s.io/apimachinery/pkg/runtime"
-	// apierrors "k8s.io/apimachinery/pkg/api/errors"
-	// "k8s.io/apimachinery/pkg/util/validation/field"
+	// "k8s.io/client-go/kubernetes".
+	// "k8s.io/klog/v2".
+	// "k8s.io/apimachinery/pkg/runtime".
+	// apierrors "k8s.io/apimachinery/pkg/api/errors".
+	// "k8s.io/apimachinery/pkg/util/validation/field".
 
-	// "k8s.io/apimachinery/pkg/runtime"
-	// "k8s.io/klog/v2"
-	// ctrl "sigs.k8s.io/controller-runtime"
+	// "k8s.io/apimachinery/pkg/runtime".
+	// "k8s.io/klog/v2".
+	// ctrl "sigs.k8s.io/controller-runtime".
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	// "sigs.k8s.io/controller-runtime/pkg/webhook"
+	// "sigs.k8s.io/controller-runtime/pkg/webhook".
 
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	// "sigs.k8s.io/controller-runtime/pkg/webhook"
+	// "sigs.k8s.io/controller-runtime/pkg/webhook".
 	vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -43,13 +43,14 @@ import (
 // log is for logging in this package.
 var shadowpodlog = logf.Log.WithName("shadowpod-resource")
 
-//+kubebuilder:webhook:path=/validate-shadowpod,mutating=false,failurePolicy=fail,sideEffects=None,groups=thesis.cnndev.io,resources=shadowpods,verbs=create;update;delete,versions=v1,name=vshadowpod.kb.io,admissionReviewVersions=v1
+//+kubebuilder:webhook:path=/validate-shadowpod,mutating=false,failurePolicy=fail,sideEffects=None,groups=webhook.liqo.io,resources=shadowpods,verbs=create;update;delete,versions=v1,name=vshadowpod.kb.io,admissionReviewVersions=v1
 
 type shadowPodValidator struct {
 	Client  client.Client
 	decoder *admission.Decoder
 }
 
+// NewShadowPodValidator creates a new shadow pod validator.
 func NewShadowPodValidator(c client.Client) admission.Handler {
 	return &shadowPodValidator{
 		Client: c,
@@ -74,11 +75,13 @@ func (spv *shadowPodValidator) Handle(ctx context.Context, req admission.Request
 	return checkValidShadowPod(shadowpod)
 }
 
-func (v *shadowPodValidator) InjectDecoder(d *admission.Decoder) error {
-	v.decoder = d
+// InjectDecoder injects the decoder.
+func (spv *shadowPodValidator) InjectDecoder(d *admission.Decoder) error {
+	spv.decoder = d
 	return nil
 }
 
+// checkValidShadowPod checks if the shadow pod is valid.
 func checkValidShadowPod(sp *vkv1alpha1.ShadowPod) admission.Response {
 	key := "shadowpod-webhook"
 
