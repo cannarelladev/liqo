@@ -16,3 +16,11 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - sharing.liqo.io
+  resources:
+  - resourceoffers
+  verbs:
+  - get
+  - list
+  - watch

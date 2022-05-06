@@ -4,7 +4,7 @@ metadata:
   name: nginx
   namespace: liqo-test
   annotations: 
-    shadowpod-webhook: deny
+    shadowpod-webhook: allowed
 spec:
   containers:
   - name: nginx
@@ -14,8 +14,8 @@ spec:
     imagePullPolicy: IfNotPresent
     resources:
       limits:
-        memory: "256M"
-        cpu: "1000m"
+        memory: "6389000000"
+        cpu: "2403m"
       requests:
         memory: "40Mi"
         cpu: "400m"

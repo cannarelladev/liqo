@@ -19,34 +19,20 @@ import (
 	"fmt"
 	"net/http"
 
-	// "github.com/onsi/ginkgo/types".
 	admissionv1 "k8s.io/api/admission/v1"
-	// "k8s.io/client-go/kubernetes".
-	// "k8s.io/klog/v2".
-	// "k8s.io/apimachinery/pkg/runtime".
-	// apierrors "k8s.io/apimachinery/pkg/api/errors".
-	// "k8s.io/apimachinery/pkg/util/validation/field".
 
-	// "k8s.io/apimachinery/pkg/runtime".
-	// "k8s.io/klog/v2".
-	// ctrl "sigs.k8s.io/controller-runtime".
-
-	//"sigs.k8s.io/controller-runtime/pkg/client"
-	// "sigs.k8s.io/controller-runtime/pkg/webhook".
-
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	// "sigs.k8s.io/controller-runtime/pkg/webhook".
-	vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	//sharing "github.com/liqotech/liqo/apis/sharing/v1alpha1"
+	vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	sharing "github.com/liqotech/liqo/apis/sharing/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
 // log is for logging in this package.
 var shadowpodlog = logf.Log.WithName("shadowpod-resource")
-
-//+kubebuilder:webhook:path=/validate-shadowpod,mutating=false,failurePolicy=fail,sideEffects=None,groups=webhook.liqo.io,resources=shadowpods,verbs=create;update;delete,versions=v1,name=vshadowpod.kb.io,admissionReviewVersions=v1
 
 type shadowPodValidator struct {
 	Client  client.Client
@@ -63,11 +49,8 @@ func NewShadowPodValidator(c client.Client) admission.Handler {
 func (spv *shadowPodValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
 
 	shadowpod := &vkv1alpha1.ShadowPod{}
+	var resourceoffer *sharing.ResourceOffer
 	var decodeErr error
-
-	//resourceoffer := &sharing.ResourceOffer{}
-
-	//spv.Client.Get(ctx, )
 
 	shadowpodlog.Info(string(req.Operation))
 	if req.Operation == admissionv1.Delete {
@@ -77,9 +60,33 @@ func (spv *shadowPodValidator) Handle(ctx context.Context, req admission.Request
 		if decodeErr != nil {
 			return admission.Errored(http.StatusBadRequest, decodeErr)
 		}
+
+		originLabel, found := shadowpod.Labels["virtualkubelet.liqo.io/origin"]
+
+		if !found {
+			return admission.Denied("missing origin Cluster ID label")
+		}
+
+		resourceofferList := &sharing.ResourceOfferList{}
+		err := spv.Client.
+			List(ctx, resourceofferList, &client.ListOptions{
+				LabelSelector: labels.SelectorFromSet(map[string]string{"discovery.liqo.io/cluster-id": originLabel}),
+			})
+		if err != nil {
+			return admission.Denied(fmt.Sprintf("error listing resource offers: %s %s", originLabel, err))
+		}
+
+		switch len(resourceofferList.Items) {
+		case 0:
+			return admission.Denied(fmt.Sprintf("no resource offer found with matching origin label %s", originLabel))
+		case 1:
+			resourceoffer = &resourceofferList.Items[0]
+		default:
+			return admission.Denied(fmt.Sprintf("multiple resource offers found with matching origin label %s", originLabel))
+		}
 	}
 
-	return checkValidShadowPod(shadowpod)
+	return checkValidShadowPod(shadowpod, resourceoffer)
 }
 
 // InjectDecoder injects the decoder.
@@ -89,31 +96,32 @@ func (spv *shadowPodValidator) InjectDecoder(d *admission.Decoder) error {
 }
 
 // checkValidShadowPod checks if the shadow pod is valid.
-func checkValidShadowPod(sp *vkv1alpha1.ShadowPod) admission.Response {
+func checkValidShadowPod(sp *vkv1alpha1.ShadowPod, ro *sharing.ResourceOffer) admission.Response {
 	key := "shadowpod-webhook"
 
 	annotation, found := sp.Annotations[key]
 
-	limits := sp.Spec.Pod.Containers[0].Resources.Limits
+	spLimits := sp.Spec.Pod.Containers[0].Resources.Limits
+	roLimits := ro.Spec.ResourceQuota.Hard
 
 	if !found {
 		return admission.Denied(fmt.Sprintf("missing annotation %s", key))
 	}
-	if limits.Cpu().IsZero() {
+	if spLimits.Cpu().IsZero() {
 		return admission.Denied("missing cpu limit")
 	}
-	if limits.Memory().IsZero() {
+	if spLimits.Memory().IsZero() {
 		return admission.Denied("missing memory limit")
 	}
 	if annotation != "allowed" {
 		return admission.Denied(fmt.Sprintf("shadowpod webhook denied: %s is not allowed", key))
 	}
-	if limits.Cpu().MilliValue() > 1000 {
-		return admission.Denied(fmt.Sprintf("shadowpod webhook denied: cpu limit %s is too high", limits.Cpu().String()))
+	if spLimits.Cpu().MilliValue() > roLimits.Cpu().MilliValue() {
+		return admission.Denied(fmt.Sprintf("shadowpod webhook denied: cpu limit %s is too high", spLimits.Cpu().String()))
 	}
 	// 256000 * 1000 = 256MB
-	if limits.Memory().Value() > 256000*1000 {
-		return admission.Denied(fmt.Sprintf("shadowpod webhook denied: memory limit %s is too high", limits.Memory().String()))
+	if spLimits.Memory().Value() > roLimits.Memory().Value() {
+		return admission.Denied(fmt.Sprintf("shadowpod webhook denied: memory limit %s is too high", spLimits.Memory().String()))
 	}
 
 	return admission.Allowed("allowed")
