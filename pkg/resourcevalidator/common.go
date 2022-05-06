@@ -15,8 +15,11 @@
 package resourceValidator
 
 import (
+	// "context"
 	vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
+	// "sigs.k8s.io/controller-runtime/pkg/client"
+	// sharing "github.com/liqotech/liqo/apis/sharing/v1alpha1"
 )
 
 func (spv *shadowPodValidator) DecodeShadowPod(obj runtime.RawExtension) (shadowpod *vkv1alpha1.ShadowPod, err error) {
@@ -24,3 +27,13 @@ func (spv *shadowPodValidator) DecodeShadowPod(obj runtime.RawExtension) (shadow
 	err = spv.decoder.DecodeRaw(obj, shadowpod)
 	return
 }
+
+/* func getResourceOfferByLabel(ctx context.Context, client client.Client, label string) (offer *sharing.ResourceOffer, err error) {
+	resourceofferList := &sharing.ResourceOfferList{}
+	offer = &sharing.ResourceOffer{}
+	err = client.List(ctx, resourceofferList, &client.ListOptions{
+		LabelSelector: labels.SelectorFromSet(map[string]string{"discovery.liqo.io/cluster-id": label}),
+	})
+
+	return
+} */
