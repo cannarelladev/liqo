@@ -33,10 +33,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
 	resourceValidator "github.com/liqotech/liqo/pkg/resourcevalidator"
-	//thesisv1 "github.com/cannarelladev/ResourceValidator/api/v1"
-	//v1 "github.com/cannarelladev/ResourceValidator/api/v1"
-	//"github.com/cannarelladev/ResourceValidator/controllers"
-	//+kubebuilder:scaffold:imports
 )
 
 var (
