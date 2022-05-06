@@ -1,23 +1,19 @@
-apiVersion: thesis.cnndev.io/v1
+apiVersion: virtualkubelet.liqo.io/v1alpha1
 kind: ShadowPod
 metadata:
   name: shadowpod-sample
-  namespace: test
-  "annotations": {
-    "shadowpod-webhook" : "allowed"
-  }
+  annotations: 
+    shadowpod-webhook: allowed
 spec:
   pod:
-    metadata:
-    spec:
-      containers:
-      - name: nginx-quota
-        image: nginx
-        imagePullPolicy: IfNotPresent
-        resources:
-          limits:
-            memory: "256M"
-            cpu: "1000m"
-          requests:
-            memory: "40Mi"
-            cpu: "400m"
+    containers:
+    - name: nginx-quota
+      image: nginx
+      imagePullPolicy: IfNotPresent
+      resources:
+        limits:
+          memory: "256M"
+          cpu: "1000m"
+        requests:
+          memory: "40Mi"
+          cpu: "400m"

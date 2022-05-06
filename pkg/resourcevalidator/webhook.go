@@ -31,12 +31,15 @@ import (
 	// "k8s.io/klog/v2".
 	// ctrl "sigs.k8s.io/controller-runtime".
 
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	//"sigs.k8s.io/controller-runtime/pkg/client"
 	// "sigs.k8s.io/controller-runtime/pkg/webhook".
 
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	// "sigs.k8s.io/controller-runtime/pkg/webhook".
 	vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	//sharing "github.com/liqotech/liqo/apis/sharing/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -61,6 +64,10 @@ func (spv *shadowPodValidator) Handle(ctx context.Context, req admission.Request
 
 	shadowpod := &vkv1alpha1.ShadowPod{}
 	var decodeErr error
+
+	//resourceoffer := &sharing.ResourceOffer{}
+
+	//spv.Client.Get(ctx, )
 
 	shadowpodlog.Info(string(req.Operation))
 	if req.Operation == admissionv1.Delete {

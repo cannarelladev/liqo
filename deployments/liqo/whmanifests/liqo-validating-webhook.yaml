@@ -17,9 +17,9 @@ webhooks:
   name: vshadowpod.kb.io
   rules:
   - apiGroups:
-    - thesis.cnndev.io
+    - virtualkubelet.liqo.io
     apiVersions:
-    - v1
+    - v1alpha1
     operations:
     - CREATE
     - UPDATE
