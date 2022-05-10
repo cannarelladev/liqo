@@ -76,6 +76,8 @@ func main() {
 		LeaderElectionID:       "93a27183.cnndev.io",
 	})
 
+
+
 	spv := resourceValidator.NewShadowPodValidator(mgr.GetClient())
 	mgr.GetWebhookServer().Register("/validate-shadowpod", &webhook.Admission{Handler: spv})
 
