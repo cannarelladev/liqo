@@ -16,77 +16,56 @@ package resourceValidator
 
 import (
 	"context"
+
+	//"encoding/json"
 	"fmt"
 	"net/http"
 
 	admissionv1 "k8s.io/api/admission/v1"
-
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+
 	sharing "github.com/liqotech/liqo/apis/sharing/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
 // log is for logging in this package.
-var shadowpodlog = logf.Log.WithName("shadowpod-resource")
+var shadowpodlog = logf.Log.WithName("[ shadowpod-resource ]")
+var webhooklog = logf.Log.WithName("[ webhook ]")
+var resourceofferlog = logf.Log.WithName("[ resourceoffer-resource ]")
 
 type shadowPodValidator struct {
-	Client  client.Client
-	decoder *admission.Decoder
+	Client       client.Client
+	PeeringCache *peeringCache
+	decoder      *admission.Decoder
 }
 
 // NewShadowPodValidator creates a new shadow pod validator.
 func NewShadowPodValidator(c client.Client) admission.Handler {
 	return &shadowPodValidator{
-		Client: c,
+		Client:       c,
+		PeeringCache: &peeringCache{map[string]peeringInfo{}},
 	}
 }
 
 func (spv *shadowPodValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
 
-	shadowpod := &vkv1alpha1.ShadowPod{}
-	var resourceoffer *sharing.ResourceOffer
-	var decodeErr error
+	webhooklog.Info(fmt.Sprintf("\t\tOperation: %s", req.Operation))
 
-	shadowpodlog.Info(string(req.Operation))
-	if req.Operation == admissionv1.Delete {
-		return admission.Allowed("allowed")
-	} else if req.Operation == admissionv1.Create {
-		shadowpod, decodeErr = spv.DecodeShadowPod(req.Object)
-		if decodeErr != nil {
-			return admission.Errored(http.StatusBadRequest, decodeErr)
-		}
-
-		originLabel, found := shadowpod.Labels["virtualkubelet.liqo.io/origin"]
-
-		if !found {
-			return admission.Denied("missing origin Cluster ID label")
-		}
-
-		resourceofferList := &sharing.ResourceOfferList{}
-		err := spv.Client.
-			List(ctx, resourceofferList, &client.ListOptions{
-				LabelSelector: labels.SelectorFromSet(map[string]string{"discovery.liqo.io/cluster-id": originLabel}),
-			})
-		if err != nil {
-			return admission.Denied(fmt.Sprintf("error listing resource offers: %s %s", originLabel, err))
-		}
-
-		switch len(resourceofferList.Items) {
-		case 0:
-			return admission.Denied(fmt.Sprintf("no resource offer found with matching origin label %s", originLabel))
-		case 1:
-			resourceoffer = &resourceofferList.Items[0]
-		default:
-			return admission.Denied(fmt.Sprintf("multiple resource offers found with matching origin label %s", originLabel))
-		}
+	switch req.Operation {
+	case admissionv1.Create:
+		return spv.HandleCreate(ctx, req)
+	case admissionv1.Delete:
+		return spv.HandleDelete(ctx, req)
+	default:
+		return admission.Denied("Unsupported operation")
 	}
-
-	return checkValidShadowPod(shadowpod, resourceoffer)
 }
 
 // InjectDecoder injects the decoder.
@@ -95,34 +74,146 @@ func (spv *shadowPodValidator) InjectDecoder(d *admission.Decoder) error {
 	return nil
 }
 
-// checkValidShadowPod checks if the shadow pod is valid.
-func checkValidShadowPod(sp *vkv1alpha1.ShadowPod, ro *sharing.ResourceOffer) admission.Response {
-	key := "shadowpod-webhook"
+func (spv *shadowPodValidator) HandleCreate(ctx context.Context, req admission.Request) admission.Response {
+	shadowpod, decodeErr := spv.DecodeShadowPod(req.Object)
+	if decodeErr != nil {
+		return admission.Errored(http.StatusBadRequest, decodeErr)
+	}
 
-	annotation, found := sp.Annotations[key]
-
-	spLimits := sp.Spec.Pod.Containers[0].Resources.Limits
-	roLimits := ro.Spec.ResourceQuota.Hard
-
+	clusterID, found := shadowpod.Labels["virtualkubelet.liqo.io/origin"]
 	if !found {
-		return admission.Denied(fmt.Sprintf("missing annotation %s", key))
+		return admission.Denied("missing origin Cluster ID label")
 	}
-	if spLimits.Cpu().IsZero() {
-		return admission.Denied("missing cpu limit")
+
+	shadowpodlog.Info(fmt.Sprintf("\tShadowPod %s decoded: UID: %s - ClusterID %s", shadowpod.Name, shadowpod.UID, clusterID))
+
+	resourceoffer, err := spv.getResourceOfferByLabel(ctx, clusterID)
+	if err != nil {
+		// TODO: to be improved
+		return admission.Errored(http.StatusBadRequest, err)
 	}
-	if spLimits.Memory().IsZero() {
-		return admission.Denied("missing memory limit")
+
+	resourceofferlog.Info(fmt.Sprintf("ResourceOffer founded for ClusterID %s", clusterID))
+
+	return checkValidShadowPod(spv.PeeringCache, shadowpod, resourceoffer, clusterID)
+}
+
+func (spv *shadowPodValidator) HandleDelete(ctx context.Context, req admission.Request) admission.Response {
+	shadowpod, decodeErr := spv.DecodeShadowPod(req.OldObject)
+	if decodeErr != nil {
+		return admission.Errored(http.StatusBadRequest, decodeErr)
 	}
-	if annotation != "allowed" {
-		return admission.Denied(fmt.Sprintf("shadowpod webhook denied: %s is not allowed", key))
+
+	clusterID, found := shadowpod.Labels["virtualkubelet.liqo.io/origin"]
+	if !found {
+		return admission.Denied("missing origin Cluster ID label")
 	}
-	if spLimits.Cpu().MilliValue() > roLimits.Cpu().MilliValue() {
-		return admission.Denied(fmt.Sprintf("shadowpod webhook denied: cpu limit %s is too high", spLimits.Cpu().String()))
+
+	resourceoffer, err := spv.getResourceOfferByLabel(ctx, clusterID)
+	if err != nil {
+		// TODO: to be improved
+		return admission.Errored(http.StatusBadRequest, err)
 	}
-	// 256000 * 1000 = 256MB
-	if spLimits.Memory().Value() > roLimits.Memory().Value() {
-		return admission.Denied(fmt.Sprintf("shadowpod webhook denied: memory limit %s is too high", spLimits.Memory().String()))
+
+	spQuota := getQuotaFromShadowPod(shadowpod)
+	roQuota := getQuotaFromResourceOffer(resourceoffer)
+
+	peeringInfo, found := spv.PeeringCache.getPeeringFromCache(clusterID)
+	if !found {
+		peeringInfo = createPeeringInfo(clusterID, roQuota)
+		spv.PeeringCache.addPeeringToCache(clusterID, peeringInfo)
+		return admission.Allowed("allowed")
 	}
+
+	err = peeringInfo.testAndUpdatePeeringInfo(spQuota, admissionv1.Delete)
+	if err != nil {
+		return admission.Denied(err.Error())
+	}
+
+	spv.PeeringCache.updatePeeringInCache(clusterID, peeringInfo)
+
+	return admission.Allowed("allowed")
+}
+
+func (spv *shadowPodValidator) getResourceOfferByLabel(ctx context.Context, label string) (*sharing.ResourceOffer, error) {
+	resourceofferList := &sharing.ResourceOfferList{}
+	if err := spv.Client.
+		List(ctx, resourceofferList, &client.ListOptions{
+			LabelSelector: labels.SelectorFromSet(map[string]string{"discovery.liqo.io/cluster-id": label}),
+		}); err != nil {
+		return nil, err
+	}
+
+	switch len(resourceofferList.Items) {
+	case 0:
+		return nil, kerrors.NewNotFound(sharing.ResourceOfferGroupResource, label)
+	case 1:
+		return &resourceofferList.Items[0], nil
+	default:
+		return nil, fmt.Errorf("multiple resource offers found with matching label %s", label)
+	}
+}
+
+func getQuotaFromResourceOffer(resourceoffer *sharing.ResourceOffer) v1.ResourceList {
+	resources := v1.ResourceList{
+		v1.ResourceName(v1.ResourceCPU):     *resourceoffer.Spec.ResourceQuota.Hard.Cpu(),
+		v1.ResourceName(v1.ResourceMemory):  *resourceoffer.Spec.ResourceQuota.Hard.Memory(),
+		v1.ResourceName(v1.ResourceStorage): *resourceoffer.Spec.ResourceQuota.Hard.Storage(),
+	}
+	/* shadowpodlog.Info(fmt.Sprintf("ResourceOffer CPU: %s", resourceoffer.Spec.ResourceQuota.Hard.Cpu()))
+	shadowpodlog.Info(fmt.Sprintf("ResourceOffer Memory: %s", resourceoffer.Spec.ResourceQuota.Hard.Memory()))
+	shadowpodlog.Info(fmt.Sprintf("ResourceOffer Storage: %s", resourceoffer.Spec.ResourceQuota.Hard.Storage())) */
+	/* resources.Cpu().Add(*resourceoffer.Spec.ResourceQuota.Hard.Cpu())
+	resources.Memory().Add(*resourceoffer.Spec.ResourceQuota.Hard.Memory())
+	resources.Storage().Add(*resourceoffer.Spec.ResourceQuota.Hard.Storage()) */
+
+	/* resources["cpu"] = resourceoffer.Spec.ResourceQuota.Hard.Cpu()
+	resources.["cpu"] = *resourceoffer.Spec.ResourceQuota.Hard.Cpu()
+	resources["memory"] = *resourceoffer.Spec.ResourceQuota.Hard.Memory()
+	resources["storage"] = *resourceoffer.Spec.ResourceQuota.Hard.Storage() */
+	return resources
+}
+
+func getQuotaFromShadowPod(shadowpod *vkv1alpha1.ShadowPod) v1.ResourceList {
+	resources := v1.ResourceList{
+		v1.ResourceName(v1.ResourceCPU):     *shadowpod.Spec.Pod.Containers[0].Resources.Limits.Cpu(),
+		v1.ResourceName(v1.ResourceMemory):  *shadowpod.Spec.Pod.Containers[0].Resources.Limits.Memory(),
+		v1.ResourceName(v1.ResourceStorage): *shadowpod.Spec.Pod.Containers[0].Resources.Limits.Storage(),
+	}
+	/* 	resources.Cpu().Add(*shadowpod.Spec.Pod.Containers[0].Resources.Limits.Cpu())
+	   	resources.Memory().Add(*shadowpod.Spec.Pod.Containers[0].Resources.Limits.Memory())
+	   	resources.Storage().Add(*shadowpod.Spec.Pod.Containers[0].Resources.Limits.Storage()) */
+	/* resources.Limits.Cpu().Add(*shadowpod.Spec.Pod.Containers[0].Resources.Limits.Cpu())
+	resources.Limits.Memory().Add(*shadowpod.Spec.Pod.Containers[0].Resources.Limits.Memory())
+	resources.Limits.Storage().Add(*shadowpod.Spec.Pod.Containers[0].Resources.Limits.Storage()) */
+	return resources
+}
+
+// checkValidShadowPod checks if the shadow pod is valid.
+func checkValidShadowPod(cache *peeringCache, sp *vkv1alpha1.ShadowPod, ro *sharing.ResourceOffer, clusterID string) admission.Response {
+	spQuota := getQuotaFromShadowPod(sp)
+	roQuota := getQuotaFromResourceOffer(ro)
+
+	shadowpodlog.Info(fmt.Sprintf("\tShadowPod resource limits %v", spQuota))
+
+	peeringInfo, found := cache.getPeeringFromCache(clusterID)
+	if !found {
+		webhooklog.Info(fmt.Sprintf("\t\tPeeringInfo not found for ClusterID %s", clusterID))
+		resourceofferlog.Info(fmt.Sprintf("ResourceOffer resource limits %#v", roQuota))
+		peeringInfo = createPeeringInfo(clusterID, roQuota)
+		webhooklog.Info(fmt.Sprintf("\t\tPeeringInfo created for ClusterID %s", clusterID))
+		webhooklog.Info(fmt.Sprintf("\t\tPeeringInfo Quota limits %#v", peeringInfo.getQuota()))
+		webhooklog.Info(fmt.Sprintf("\t\tPeeringInfo UsedQuota limits %#v", peeringInfo.getUsedQuota()))
+		webhooklog.Info(fmt.Sprintf("\t\tPeeringInfo FreeQuota limits %#v", peeringInfo.getFreeQuota()))
+		cache.addPeeringToCache(clusterID, peeringInfo)
+	}
+
+	err := peeringInfo.testAndUpdatePeeringInfo(spQuota, admissionv1.Create)
+	if err != nil {
+		return admission.Denied(err.Error())
+	}
+
+	cache.updatePeeringInCache(clusterID, peeringInfo)
 
 	return admission.Allowed("allowed")
 }
