@@ -16,6 +16,7 @@ package resourceValidator
 
 import (
 	"context"
+	"sync"
 
 	//"encoding/json"
 	"fmt"
@@ -50,7 +51,7 @@ type shadowPodValidator struct {
 func NewShadowPodValidator(c client.Client) admission.Handler {
 	return &shadowPodValidator{
 		Client:       c,
-		PeeringCache: &peeringCache{map[string]peeringInfo{}},
+		PeeringCache: &peeringCache{sync.RWMutex{}, map[string]peeringInfo{}},
 	}
 }
 
@@ -85,7 +86,7 @@ func (spv *shadowPodValidator) HandleCreate(ctx context.Context, req admission.R
 		return admission.Denied("missing origin Cluster ID label")
 	}
 
-	shadowpodlog.Info(fmt.Sprintf("\tShadowPod %s decoded: UID: %s - ClusterID %s", shadowpod.Name, shadowpod.UID, clusterID))
+	shadowpodlog.Info(fmt.Sprintf("\tShadowPod %s decoded: UID: %s - ClusterID %s", shadowpod.Name, shadowpod.GetUID(), clusterID))
 
 	resourceoffer, err := spv.getResourceOfferByLabel(ctx, clusterID)
 	if err != nil {
@@ -160,17 +161,6 @@ func getQuotaFromResourceOffer(resourceoffer *sharing.ResourceOffer) v1.Resource
 		v1.ResourceName(v1.ResourceMemory):  *resourceoffer.Spec.ResourceQuota.Hard.Memory(),
 		v1.ResourceName(v1.ResourceStorage): *resourceoffer.Spec.ResourceQuota.Hard.Storage(),
 	}
-	/* shadowpodlog.Info(fmt.Sprintf("ResourceOffer CPU: %s", resourceoffer.Spec.ResourceQuota.Hard.Cpu()))
-	shadowpodlog.Info(fmt.Sprintf("ResourceOffer Memory: %s", resourceoffer.Spec.ResourceQuota.Hard.Memory()))
-	shadowpodlog.Info(fmt.Sprintf("ResourceOffer Storage: %s", resourceoffer.Spec.ResourceQuota.Hard.Storage())) */
-	/* resources.Cpu().Add(*resourceoffer.Spec.ResourceQuota.Hard.Cpu())
-	resources.Memory().Add(*resourceoffer.Spec.ResourceQuota.Hard.Memory())
-	resources.Storage().Add(*resourceoffer.Spec.ResourceQuota.Hard.Storage()) */
-
-	/* resources["cpu"] = resourceoffer.Spec.ResourceQuota.Hard.Cpu()
-	resources.["cpu"] = *resourceoffer.Spec.ResourceQuota.Hard.Cpu()
-	resources["memory"] = *resourceoffer.Spec.ResourceQuota.Hard.Memory()
-	resources["storage"] = *resourceoffer.Spec.ResourceQuota.Hard.Storage() */
 	return resources
 }
 
@@ -180,12 +170,6 @@ func getQuotaFromShadowPod(shadowpod *vkv1alpha1.ShadowPod) v1.ResourceList {
 		v1.ResourceName(v1.ResourceMemory):  *shadowpod.Spec.Pod.Containers[0].Resources.Limits.Memory(),
 		v1.ResourceName(v1.ResourceStorage): *shadowpod.Spec.Pod.Containers[0].Resources.Limits.Storage(),
 	}
-	/* 	resources.Cpu().Add(*shadowpod.Spec.Pod.Containers[0].Resources.Limits.Cpu())
-	   	resources.Memory().Add(*shadowpod.Spec.Pod.Containers[0].Resources.Limits.Memory())
-	   	resources.Storage().Add(*shadowpod.Spec.Pod.Containers[0].Resources.Limits.Storage()) */
-	/* resources.Limits.Cpu().Add(*shadowpod.Spec.Pod.Containers[0].Resources.Limits.Cpu())
-	resources.Limits.Memory().Add(*shadowpod.Spec.Pod.Containers[0].Resources.Limits.Memory())
-	resources.Limits.Storage().Add(*shadowpod.Spec.Pod.Containers[0].Resources.Limits.Storage()) */
 	return resources
 }
 
@@ -194,17 +178,17 @@ func checkValidShadowPod(cache *peeringCache, sp *vkv1alpha1.ShadowPod, ro *shar
 	spQuota := getQuotaFromShadowPod(sp)
 	roQuota := getQuotaFromResourceOffer(ro)
 
-	shadowpodlog.Info(fmt.Sprintf("\tShadowPod resource limits %v", spQuota))
+	shadowpodlog.Info(quotaFormatter(spQuota, "\tShadowPod resource limits"))
 
 	peeringInfo, found := cache.getPeeringFromCache(clusterID)
 	if !found {
 		webhooklog.Info(fmt.Sprintf("\t\tPeeringInfo not found for ClusterID %s", clusterID))
-		resourceofferlog.Info(fmt.Sprintf("ResourceOffer resource limits %#v", roQuota))
+		resourceofferlog.Info(quotaFormatter(roQuota, "ResourceOffer resource limits"))
 		peeringInfo = createPeeringInfo(clusterID, roQuota)
 		webhooklog.Info(fmt.Sprintf("\t\tPeeringInfo created for ClusterID %s", clusterID))
-		webhooklog.Info(fmt.Sprintf("\t\tPeeringInfo Quota limits %#v", peeringInfo.getQuota()))
-		webhooklog.Info(fmt.Sprintf("\t\tPeeringInfo UsedQuota limits %#v", peeringInfo.getUsedQuota()))
-		webhooklog.Info(fmt.Sprintf("\t\tPeeringInfo FreeQuota limits %#v", peeringInfo.getFreeQuota()))
+		webhooklog.Info(quotaFormatter(peeringInfo.getQuota(), "\t\tNew PeeringInfo Quota limits"))
+		webhooklog.Info(quotaFormatter(peeringInfo.getUsedQuota(), "\t\tNew PeeringInfo UsedQuota limits"))
+		webhooklog.Info(quotaFormatter(peeringInfo.getFreeQuota(), "\t\tNew PeeringInfo FreeQuota limits"))
 		cache.addPeeringToCache(clusterID, peeringInfo)
 	}
 
