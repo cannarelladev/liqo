@@ -34,15 +34,24 @@ var cachelog = logf.Log.WithName("[ webhook-cache ]")
 
 type peeringInfo struct {
 	ClusterID        string
+	ShadowPodUIDList []string
 	PeeringQuota     v1.ResourceList
 	UsedPeeringQuota v1.ResourceList
 	FreePeeringQuota v1.ResourceList
+	piMutex          sync.RWMutex
 	LastUpdateTime   string
 }
 
 type peeringCache struct {
-	cacheMutex  sync.RWMutex
 	peeringInfo map[string]peeringInfo
+}
+
+func (pi *peeringInfo) Lock() {
+	pi.piMutex.Lock()
+}
+
+func (pi *peeringInfo) Unlock() {
+	pi.piMutex.Unlock()
 }
 
 func (pi *peeringInfo) addResources(resources v1.ResourceList) {
@@ -87,6 +96,7 @@ func createPeeringInfo(clusterID string, resources v1.ResourceList) peeringInfo 
 		PeeringQuota:     resources.DeepCopy(),
 		UsedPeeringQuota: generateQuotaPattern(resources),
 		FreePeeringQuota: resources.DeepCopy(),
+		piMutex:          sync.RWMutex{},
 		LastUpdateTime:   time.Now().Format(time.RFC3339),
 	}
 }
@@ -126,6 +136,7 @@ func refreshPeeringQuota(ctx context.Context, c client.Client, clusterID string)
 
 func (pi *peeringInfo) testAndUpdatePeeringInfo(shadowPodQuota v1.ResourceList, operation admissionv1.Operation) error {
 	cachelog.Info(fmt.Sprintf("\tOperation: %s", operation))
+	pi.Lock()
 	cachelog.Info(quotaFormatter(shadowPodQuota, "\tShadowPodQuota"))
 	cachelog.Info(quotaFormatter(pi.PeeringQuota, "\tPeeringInfo Quota"))
 	cachelog.Info(quotaFormatter(pi.UsedPeeringQuota, "\tPeeringInfo UsedQuota"))
@@ -139,6 +150,7 @@ func (pi *peeringInfo) testAndUpdatePeeringInfo(shadowPodQuota v1.ResourceList, 
 					pi.FreePeeringQuota.Cpu(),
 					shadowPodQuota.Cpu()),
 			)
+			pi.Unlock()
 			return fmt.Errorf("PEERING INFO: Peering CPU quota usage exceeded")
 		}
 		if pi.FreePeeringQuota.Memory().Value() < shadowPodQuota.Memory().Value() {
@@ -147,6 +159,7 @@ func (pi *peeringInfo) testAndUpdatePeeringInfo(shadowPodQuota v1.ResourceList, 
 					pi.FreePeeringQuota.Memory(),
 					shadowPodQuota.Memory()),
 			)
+			pi.Unlock()
 			return fmt.Errorf("PEERING INFO: Peering Memory quota usage exceeded")
 		}
 		if pi.FreePeeringQuota.Storage().Value() < shadowPodQuota.Storage().Value() {
@@ -155,15 +168,16 @@ func (pi *peeringInfo) testAndUpdatePeeringInfo(shadowPodQuota v1.ResourceList, 
 					pi.FreePeeringQuota.Storage(),
 					shadowPodQuota.Storage()),
 			)
+			pi.Unlock()
 			return fmt.Errorf("PEERING INFO: Peering Disk quota usage exceeded")
 		}
 		pi.subtractResources(shadowPodQuota)
 		cachelog.Info(quotaFormatter(pi.PeeringQuota, "\tUpdated PeeringInfo Quota"))
 		cachelog.Info(quotaFormatter(pi.UsedPeeringQuota, "\tUpdated PeeringInfo UsedQuota"))
 		cachelog.Info(quotaFormatter(pi.FreePeeringQuota, "\tUpdated PeeringInfo FreeQuota"))
+		pi.Unlock()
 		return nil
 	case admissionv1.Delete:
-		cachelog.Info(fmt.Sprintf("\tOperation: %s", operation))
 		cachelog.Info(quotaFormatter(shadowPodQuota, "\tShadowPodQuota"))
 		cachelog.Info(quotaFormatter(pi.PeeringQuota, "\tPeeringInfo Quota"))
 		cachelog.Info(quotaFormatter(pi.UsedPeeringQuota, "\tPeeringInfo UsedQuota"))
@@ -172,8 +186,10 @@ func (pi *peeringInfo) testAndUpdatePeeringInfo(shadowPodQuota v1.ResourceList, 
 		cachelog.Info(quotaFormatter(pi.PeeringQuota, "\tUpdated PeeringInfo Quota"))
 		cachelog.Info(quotaFormatter(pi.UsedPeeringQuota, "\tUpdated PeeringInfo UsedQuota"))
 		cachelog.Info(quotaFormatter(pi.FreePeeringQuota, "\tUpdated PeeringInfo FreeQuota"))
+		pi.Unlock()
 		return nil
 	default:
+		pi.Unlock()
 		return fmt.Errorf("PEERING INFO: operation not supported")
 	}
 }
