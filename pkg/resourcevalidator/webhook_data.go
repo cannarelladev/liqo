@@ -17,6 +17,7 @@ package resourceValidator
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	admissionv1 "k8s.io/api/admission/v1"
@@ -40,38 +41,52 @@ type peeringInfo struct {
 }
 
 type peeringCache struct {
+	cacheMutex  sync.RWMutex
 	peeringInfo map[string]peeringInfo
 }
 
 func (pi *peeringInfo) addResources(resources v1.ResourceList) {
-	pi.UsedPeeringQuota.Cpu().Add(*resources.Cpu())
-	pi.UsedPeeringQuota.Memory().Add(*resources.Memory())
-	pi.UsedPeeringQuota.Storage().Add(*resources.Storage())
-	pi.FreePeeringQuota.Cpu().Sub(*resources.Cpu())
-	pi.FreePeeringQuota.Memory().Sub(*resources.Memory())
-	pi.FreePeeringQuota.Storage().Sub(*resources.Storage())
+	for key, val := range resources {
+		if prevFree, ok := pi.FreePeeringQuota[key]; ok {
+			prevFree.Add(val)
+			pi.FreePeeringQuota[key] = prevFree
+		} else {
+			pi.FreePeeringQuota[key] = val.DeepCopy()
+		}
+		if prevUsed, ok := pi.UsedPeeringQuota[key]; ok {
+			prevUsed.Sub(val)
+			pi.UsedPeeringQuota[key] = prevUsed
+		} else {
+			pi.UsedPeeringQuota[key] = val.DeepCopy()
+		}
+	}
 	pi.LastUpdateTime = time.Now().Format(time.RFC3339)
 }
 
 func (pi *peeringInfo) subtractResources(resources v1.ResourceList) {
-	cachelog.Info(fmt.Sprintf("%s", resources.Cpu()))
-	cachelog.Info(fmt.Sprintf("before %s", pi.FreePeeringQuota.Cpu()))
-	pi.UsedPeeringQuota.Cpu().Sub(*resources.Cpu())
-	pi.UsedPeeringQuota.Memory().Sub(*resources.Memory())
-	pi.UsedPeeringQuota.Storage().Sub(*resources.Storage())
-	pi.FreePeeringQuota.Cpu().Add(*resources.Cpu())
-	pi.FreePeeringQuota.Memory().Add(*resources.Memory())
-	pi.FreePeeringQuota.Storage().Add(*resources.Storage())
-	cachelog.Info(fmt.Sprintf("after %s", pi.FreePeeringQuota.Cpu()))
+	for key, val := range resources {
+		if prevFree, ok := pi.FreePeeringQuota[key]; ok {
+			prevFree.Sub(val)
+			pi.FreePeeringQuota[key] = prevFree
+		} else {
+			pi.FreePeeringQuota[key] = val.DeepCopy()
+		}
+		if prevUsed, ok := pi.UsedPeeringQuota[key]; ok {
+			prevUsed.Add(val)
+			pi.UsedPeeringQuota[key] = prevUsed
+		} else {
+			pi.UsedPeeringQuota[key] = val.DeepCopy()
+		}
+	}
 	pi.LastUpdateTime = time.Now().Format(time.RFC3339)
 }
 
 func createPeeringInfo(clusterID string, resources v1.ResourceList) peeringInfo {
 	return peeringInfo{
 		ClusterID:        clusterID,
-		PeeringQuota:     resources,
-		UsedPeeringQuota: v1.ResourceList{},
-		FreePeeringQuota: resources,
+		PeeringQuota:     resources.DeepCopy(),
+		UsedPeeringQuota: generateQuotaPattern(resources),
+		FreePeeringQuota: resources.DeepCopy(),
 		LastUpdateTime:   time.Now().Format(time.RFC3339),
 	}
 }
@@ -110,19 +125,17 @@ func refreshPeeringQuota(ctx context.Context, c client.Client, clusterID string)
 }
 
 func (pi *peeringInfo) testAndUpdatePeeringInfo(shadowPodQuota v1.ResourceList, operation admissionv1.Operation) error {
-	cachelog.Info(fmt.Sprintf("Operation: %s", operation))
-	cachelog.Info(fmt.Sprintf("ShadowPodQuota: %#v", shadowPodQuota))
-	cachelog.Info(
-		fmt.Sprintf("Peering Info: \n\t - Quota: %#v \n\t - UsedQuota: %#v \n\t - FreeQuota: %#v",
-			pi.PeeringQuota,
-			pi.UsedPeeringQuota,
-			pi.FreePeeringQuota),
-	)
+	cachelog.Info(fmt.Sprintf("\tOperation: %s", operation))
+	cachelog.Info(quotaFormatter(shadowPodQuota, "\tShadowPodQuota"))
+	cachelog.Info(quotaFormatter(pi.PeeringQuota, "\tPeeringInfo Quota"))
+	cachelog.Info(quotaFormatter(pi.UsedPeeringQuota, "\tPeeringInfo UsedQuota"))
+	cachelog.Info(quotaFormatter(pi.FreePeeringQuota, "\tPeeringInfo FreeQuota"))
+
 	switch operation {
 	case admissionv1.Create:
 		if pi.FreePeeringQuota.Cpu().MilliValue() < shadowPodQuota.Cpu().MilliValue() {
 			cachelog.Info(
-				fmt.Sprintf("PEERING INFO: Peering CPU quota usage exceeded - FREE %s / REQUESTED %s",
+				fmt.Sprintf("\tPEERING INFO: Peering CPU quota usage exceeded - FREE %s / REQUESTED %s",
 					pi.FreePeeringQuota.Cpu(),
 					shadowPodQuota.Cpu()),
 			)
@@ -130,7 +143,7 @@ func (pi *peeringInfo) testAndUpdatePeeringInfo(shadowPodQuota v1.ResourceList, 
 		}
 		if pi.FreePeeringQuota.Memory().Value() < shadowPodQuota.Memory().Value() {
 			cachelog.Info(
-				fmt.Sprintf("PEERING INFO: Peering Memory quota usage exceeded - FREE %s / REQUESTED %s",
+				fmt.Sprintf("\tPEERING INFO: Peering Memory quota usage exceeded - FREE %s / REQUESTED %s",
 					pi.FreePeeringQuota.Memory(),
 					shadowPodQuota.Memory()),
 			)
@@ -138,22 +151,27 @@ func (pi *peeringInfo) testAndUpdatePeeringInfo(shadowPodQuota v1.ResourceList, 
 		}
 		if pi.FreePeeringQuota.Storage().Value() < shadowPodQuota.Storage().Value() {
 			cachelog.Info(
-				fmt.Sprintf("PEERING INFO: Peering Storage quota usage exceeded - FREE %s / REQUESTED %s",
+				fmt.Sprintf("\tPEERING INFO: Peering Storage quota usage exceeded - FREE %s / REQUESTED %s",
 					pi.FreePeeringQuota.Storage(),
 					shadowPodQuota.Storage()),
 			)
 			return fmt.Errorf("PEERING INFO: Peering Disk quota usage exceeded")
 		}
 		pi.subtractResources(shadowPodQuota)
-		cachelog.Info(
-			fmt.Sprintf("Peering Info updated: \n\t - Quota: %#v \n\t - UsedQuota: %#v \n\t - FreeQuota: %#v",
-				pi.PeeringQuota,
-				pi.UsedPeeringQuota,
-				pi.FreePeeringQuota),
-		)
+		cachelog.Info(quotaFormatter(pi.PeeringQuota, "\tUpdated PeeringInfo Quota"))
+		cachelog.Info(quotaFormatter(pi.UsedPeeringQuota, "\tUpdated PeeringInfo UsedQuota"))
+		cachelog.Info(quotaFormatter(pi.FreePeeringQuota, "\tUpdated PeeringInfo FreeQuota"))
 		return nil
 	case admissionv1.Delete:
+		cachelog.Info(fmt.Sprintf("\tOperation: %s", operation))
+		cachelog.Info(quotaFormatter(shadowPodQuota, "\tShadowPodQuota"))
+		cachelog.Info(quotaFormatter(pi.PeeringQuota, "\tPeeringInfo Quota"))
+		cachelog.Info(quotaFormatter(pi.UsedPeeringQuota, "\tPeeringInfo UsedQuota"))
+		cachelog.Info(quotaFormatter(pi.FreePeeringQuota, "\tPeeringInfo FreeQuota"))
 		pi.addResources(shadowPodQuota)
+		cachelog.Info(quotaFormatter(pi.PeeringQuota, "\tUpdated PeeringInfo Quota"))
+		cachelog.Info(quotaFormatter(pi.UsedPeeringQuota, "\tUpdated PeeringInfo UsedQuota"))
+		cachelog.Info(quotaFormatter(pi.FreePeeringQuota, "\tUpdated PeeringInfo FreeQuota"))
 		return nil
 	default:
 		return fmt.Errorf("PEERING INFO: operation not supported")

@@ -16,7 +16,11 @@ package resourceValidator
 
 import (
 	// "context"
+	"fmt"
+
 	vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	// "sigs.k8s.io/controller-runtime/pkg/client"
 	// sharing "github.com/liqotech/liqo/apis/sharing/v1alpha1"
@@ -26,6 +30,24 @@ func (spv *shadowPodValidator) DecodeShadowPod(obj runtime.RawExtension) (shadow
 	shadowpod = &vkv1alpha1.ShadowPod{}
 	err = spv.decoder.DecodeRaw(obj, shadowpod)
 	return
+}
+
+func quotaFormatter(quota v1.ResourceList, quotaName string) string {
+	result := fmt.Sprintf("%s [ ", quotaName)
+	for k, v := range quota {
+		result += fmt.Sprintf("%s: %s, ", k, v.String())
+	}
+	result += "]"
+	return result
+}
+
+func generateQuotaPattern(quota v1.ResourceList) v1.ResourceList {
+	quantity := resource.Quantity(*resource.NewQuantity(0, resource.DecimalSI))
+	result := v1.ResourceList{}
+	for k, _ := range quota {
+		result[k] = quantity.DeepCopy()
+	}
+	return result
 }
 
 /* func getResourceOfferByLabel(ctx context.Context, client client.Client, label string) (offer *sharing.ResourceOffer, err error) {
