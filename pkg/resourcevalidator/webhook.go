@@ -16,7 +16,6 @@ package resourceValidator
 
 import (
 	"context"
-	"sync"
 
 	//"encoding/json"
 	"fmt"
@@ -51,7 +50,7 @@ type shadowPodValidator struct {
 func NewShadowPodValidator(c client.Client) admission.Handler {
 	return &shadowPodValidator{
 		Client:       c,
-		PeeringCache: &peeringCache{sync.RWMutex{}, map[string]peeringInfo{}},
+		PeeringCache: &peeringCache{map[string]peeringInfo{}},
 	}
 }
 
