@@ -76,8 +76,6 @@ func main() {
 		LeaderElectionID:       "93a27183.cnndev.io",
 	})
 
-
-
 	spv := resourceValidator.NewShadowPodValidator(mgr.GetClient())
 	mgr.GetWebhookServer().Register("/validate-shadowpod", &webhook.Admission{Handler: spv})
 
@@ -100,6 +98,9 @@ func main() {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
+
+	//mgr.Add()
+	//wait.PollImmediateInfiniteWithContext()
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
