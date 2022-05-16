@@ -22,19 +22,25 @@ import (
 
 	admissionv1 "k8s.io/api/admission/v1"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
+	//"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-
-	vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
+	//vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
 )
 
 // log is for logging in this package.
 var cachelog = logf.Log.WithName("[ webhook-cache ]")
 
+// ShadowPodDescription is a struct that contains the main informations about a shadow pod.
+type ShadowPodDescription struct {
+	Quota     v1.ResourceList
+	timestamp string
+	running   bool
+}
+
 type peeringInfo struct {
 	ClusterID        string
-	ShadowPodUIDList []string
+	SPList           map[string]ShadowPodDescription
 	PeeringQuota     v1.ResourceList
 	UsedPeeringQuota v1.ResourceList
 	FreePeeringQuota v1.ResourceList
@@ -43,7 +49,7 @@ type peeringInfo struct {
 }
 
 type peeringCache struct {
-	peeringInfo map[string]peeringInfo
+	peeringInfo map[string]*peeringInfo
 }
 
 func (pi *peeringInfo) Lock() {
@@ -90,9 +96,10 @@ func (pi *peeringInfo) subtractResources(resources v1.ResourceList) {
 	pi.LastUpdateTime = time.Now().Format(time.RFC3339)
 }
 
-func createPeeringInfo(clusterID string, resources v1.ResourceList) peeringInfo {
-	return peeringInfo{
+func createPeeringInfo(clusterID string, resources v1.ResourceList) *peeringInfo {
+	return &peeringInfo{
 		ClusterID:        clusterID,
+		SPList:           map[string]ShadowPodDescription{},
 		PeeringQuota:     resources.DeepCopy(),
 		UsedPeeringQuota: generateQuotaPattern(resources),
 		FreePeeringQuota: resources.DeepCopy(),
@@ -101,12 +108,16 @@ func createPeeringInfo(clusterID string, resources v1.ResourceList) peeringInfo 
 	}
 }
 
-func (pc *peeringCache) getPeeringFromCache(clusterID string) (peeringInfo, bool) {
+func (pc *peeringCache) getAllPeeringInfo() map[string]*peeringInfo {
+	return pc.peeringInfo
+}
+
+func (pc *peeringCache) getPeeringFromCache(clusterID string) (*peeringInfo, bool) {
 	pi, found := pc.peeringInfo[clusterID]
 	return pi, found
 }
 
-func (pc *peeringCache) addPeeringToCache(clusterID string, pi peeringInfo) {
+func (pc *peeringCache) addPeeringToCache(clusterID string, pi *peeringInfo) {
 	pc.peeringInfo[clusterID] = pi
 }
 
@@ -114,24 +125,37 @@ func (pc *peeringCache) deletePeeringFromCache(clusterID string) {
 	delete(pc.peeringInfo, clusterID)
 }
 
-func (pc *peeringCache) updatePeeringInCache(clusterID string, pi peeringInfo) {
+func (pc *peeringCache) updatePeeringInCache(clusterID string, pi *peeringInfo) {
 	pc.peeringInfo[clusterID] = pi
 }
 
-func refreshPeeringQuota(ctx context.Context, c client.Client, clusterID string) (v1.ResourceList, error) {
-	var resources v1.ResourceList
-	shadowPodList := vkv1alpha1.ShadowPodList{}
-	if err := c.List(ctx, &shadowPodList, &client.ListOptions{
-		LabelSelector: labels.SelectorFromSet(map[string]string{"virtualkubelet.liqo.io/origin": clusterID}),
-	}); err != nil {
-		return nil, err
-	}
-	for _, shadowPod := range shadowPodList.Items {
-		resources.Cpu().Add(*shadowPod.Spec.Pod.Containers[0].Resources.Limits.Cpu())
-		resources.Memory().Add(*shadowPod.Spec.Pod.Containers[0].Resources.Limits.Memory())
-		resources.Storage().Add(*shadowPod.Spec.Pod.Containers[0].Resources.Limits.Storage())
-	}
-	return resources, nil
+// TODO: refresh has to be an update and not a new cache generation
+func (spv *shadowPodValidator) refreshCache(ctx context.Context, c client.Client) error {
+	/* for clusterID, pi := range spv.PeeringCache.getAllPeeringInfo() {
+		shadowPodList := vkv1alpha1.ShadowPodList{}
+		pi.Lock()
+		defer pi.Unlock()
+		if err := c.List(ctx, &shadowPodList, &client.ListOptions{
+			LabelSelector: labels.SelectorFromSet(map[string]string{"virtualkubelet.liqo.io/origin": clusterID}),
+		}); err != nil {
+			return err
+		}
+		resourceOffer, err := spv.getResourceOfferByLabel(ctx, clusterID)
+		if err != nil {
+			return err
+		}
+		resourceOfferQuota := getQuotaFromResourceOffer(resourceOffer)
+		pi.PeeringQuota = resourceOfferQuota.DeepCopy()
+		pi.UsedPeeringQuota = generateQuotaPattern(resourceOfferQuota)
+		pi.FreePeeringQuota = resourceOfferQuota.DeepCopy()
+		pi.SPList = make(map[string]ShadowPodDescription)
+		for _, shadowPod := range shadowPodList.Items {
+
+			pi.SPList = append(pi.SPList, string(shadowPod.GetUID()))
+			pi.subtractResources(getQuotaFromShadowPod(&shadowPod))
+		}
+	} */
+	return nil
 }
 
 func (pi *peeringInfo) testAndUpdatePeeringInfo(shadowPodQuota v1.ResourceList, operation admissionv1.Operation) error {

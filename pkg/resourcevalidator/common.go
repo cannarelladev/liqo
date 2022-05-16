@@ -42,7 +42,7 @@ func quotaFormatter(quota v1.ResourceList, quotaName string) string {
 }
 
 func generateQuotaPattern(quota v1.ResourceList) v1.ResourceList {
-	quantity := resource.Quantity(*resource.NewQuantity(0, resource.DecimalSI))
+	quantity := resource.NewQuantity(0, resource.DecimalSI)
 	result := v1.ResourceList{}
 	for k, _ := range quota {
 		result[k] = quantity.DeepCopy()
