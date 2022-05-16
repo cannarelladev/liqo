@@ -15,17 +15,17 @@
 package resourceValidator
 
 import (
-	"context"
+	// "context".
 	"fmt"
 	"sync"
 	"time"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	v1 "k8s.io/api/core/v1"
-	//"k8s.io/apimachinery/pkg/labels"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	// "k8s.io/apimachinery/pkg/labels".
+	// "sigs.k8s.io/controller-runtime/pkg/client".
+	// vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1".
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	//vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
 )
 
 // log is for logging in this package.
@@ -130,8 +130,8 @@ func (pc *peeringCache) updatePeeringInCache(clusterID string, pi *peeringInfo) 
 }
 
 // TODO: refresh has to be an update and not a new cache generation
-func (spv *shadowPodValidator) refreshCache(ctx context.Context, c client.Client) error {
-	/* for clusterID, pi := range spv.PeeringCache.getAllPeeringInfo() {
+/* func (spv *shadowPodValidator) refreshCache(ctx context.Context, c client.Client) error {
+	for clusterID, pi := range spv.PeeringCache.getAllPeeringInfo() {
 		shadowPodList := vkv1alpha1.ShadowPodList{}
 		pi.Lock()
 		defer pi.Unlock()
@@ -154,9 +154,9 @@ func (spv *shadowPodValidator) refreshCache(ctx context.Context, c client.Client
 			pi.SPList = append(pi.SPList, string(shadowPod.GetUID()))
 			pi.subtractResources(getQuotaFromShadowPod(&shadowPod))
 		}
-	} */
+	}
 	return nil
-}
+} */
 
 func (pi *peeringInfo) testAndUpdatePeeringInfo(shadowPodQuota v1.ResourceList, operation admissionv1.Operation) error {
 	cachelog.Info(fmt.Sprintf("\tOperation: %s", operation))

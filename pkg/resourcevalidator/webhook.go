@@ -16,19 +16,19 @@ package resourceValidator
 
 import (
 	"context"
-	//"encoding/json"
+	// "encoding/json".
 	"fmt"
 	"net/http"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/labels"
 
 	sharing "github.com/liqotech/liqo/apis/sharing/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -155,18 +155,18 @@ func (spv *shadowPodValidator) getResourceOfferByLabel(ctx context.Context, labe
 
 func getQuotaFromResourceOffer(resourceoffer *sharing.ResourceOffer) v1.ResourceList {
 	resources := v1.ResourceList{
-		v1.ResourceName(v1.ResourceCPU):     *resourceoffer.Spec.ResourceQuota.Hard.Cpu(),
-		v1.ResourceName(v1.ResourceMemory):  *resourceoffer.Spec.ResourceQuota.Hard.Memory(),
-		v1.ResourceName(v1.ResourceStorage): *resourceoffer.Spec.ResourceQuota.Hard.Storage(),
+		v1.ResourceCPU:     *resourceoffer.Spec.ResourceQuota.Hard.Cpu(),
+		v1.ResourceMemory:  *resourceoffer.Spec.ResourceQuota.Hard.Memory(),
+		v1.ResourceStorage: *resourceoffer.Spec.ResourceQuota.Hard.Storage(),
 	}
 	return resources
 }
 
 func getQuotaFromShadowPod(shadowpod *vkv1alpha1.ShadowPod) v1.ResourceList {
 	resources := v1.ResourceList{
-		v1.ResourceName(v1.ResourceCPU):     *shadowpod.Spec.Pod.Containers[0].Resources.Limits.Cpu(),
-		v1.ResourceName(v1.ResourceMemory):  *shadowpod.Spec.Pod.Containers[0].Resources.Limits.Memory(),
-		v1.ResourceName(v1.ResourceStorage): *shadowpod.Spec.Pod.Containers[0].Resources.Limits.Storage(),
+		v1.ResourceCPU:     *shadowpod.Spec.Pod.Containers[0].Resources.Limits.Cpu(),
+		v1.ResourceMemory:  *shadowpod.Spec.Pod.Containers[0].Resources.Limits.Memory(),
+		v1.ResourceStorage: *shadowpod.Spec.Pod.Containers[0].Resources.Limits.Storage(),
 	}
 	return resources
 }
