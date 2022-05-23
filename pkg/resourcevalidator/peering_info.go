@@ -142,7 +142,6 @@ func (pi *peeringInfo) terminateShadowPod(spd ShadowPodDescription) {
 func (pi *peeringInfo) removeShadowPod(spd ShadowPodDescription) {
 	pi.Lock()
 	delete(pi.SPList, spd.UID)
-	//pi.addResources(spd.Quota)
 	pi.Unlock()
 }
 

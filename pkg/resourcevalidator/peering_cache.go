@@ -55,7 +55,7 @@ func (pc *peeringCache) updatePeeringInCache(clusterID string, pi *peeringInfo) 
 	pc.peeringInfo[clusterID] = pi
 }
 
-// TODO: refresh has to be an update and not a new cache generation
+// TODO: refresh has to be an update and not a new cache generation.
 func (spv *shadowPodValidator) refreshCache(ctx context.Context, c client.Client) error {
 	shadowPodList := vkv1alpha1.ShadowPodList{}
 	resourceOfferList := sharing.ResourceOfferList{}
@@ -64,12 +64,13 @@ func (spv *shadowPodValidator) refreshCache(ctx context.Context, c client.Client
 	}
 	if !spv.PeeringCache.init {
 		spv.PeeringCache.init = true
-		for _, ro := range resourceOfferList.Items {
+		for i := range resourceOfferList.Items {
+			ro := &resourceOfferList.Items[i]
 			ClusterID := ro.Labels["discovery.liqo.io/cluster-id"]
 			if ClusterID == "" {
 				return fmt.Errorf("resource offer %s has no cluster id", ro.Name)
 			}
-			spv.PeeringCache.addPeeringToCache(ClusterID, createPeeringInfo(ClusterID, getQuotaFromResourceOffer(&ro)))
+			spv.PeeringCache.addPeeringToCache(ClusterID, createPeeringInfo(ClusterID, getQuotaFromResourceOffer(ro)))
 		}
 	} else {
 		// Ciclo su tutti i Peering registrati in cache
@@ -85,28 +86,9 @@ func (spv *shadowPodValidator) refreshCache(ctx context.Context, c client.Client
 				return err
 			}
 
-			// Check if in the system snapshot exists the desidered resource offer, so the peering is still up
-			// resourceOffer := filterResourceOffer(resourceOfferList.Items, clusterID)
-			// If the resource offer is not found, the peering is down
-			/* if resourceOffer == nil && pi.isRunning() {
-				// If the peering is still up and the resource offer is not found it will be marked as down so next time it will be deleted
-				pi.terminate()
-				pi.Unlock()
-				continue
-			} else if resourceOffer == nil && !pi.isRunning() {
-				// If the peering is down and the resource offer is not found it will be deleted
-				spv.PeeringCache.deletePeeringFromCache(clusterID)
-				pi.Unlock()
-				continue
-			}
-
-			// If the resource offer is found, it will be refreshed
-			// If the peering is down be marked as up
-			if !pi.isRunning() {
-				pi.start()
-			} */
-
-			for _, shadowPod := range shadowPodList.Items {
+			// Ciclo su tutti i shadow pods del cluster
+			for i := range shadowPodList.Items {
+				shadowPod := &shadowPodList.Items[i]
 				_, found := pi.getShadowPodDescription(string(shadowPod.GetUID()))
 				if !found {
 					cachelog.Info(fmt.Sprintf("Shadow pod %s not found in cache", shadowPod.GetUID()))
@@ -114,13 +96,9 @@ func (spv *shadowPodValidator) refreshCache(ctx context.Context, c client.Client
 					continue
 				}
 				spMap[string(shadowPod.GetUID())] = string(shadowPod.GetUID())
-				// If shadowPodDescription is not running and last updated was more than 30 seconds ago, it will be deleted
-				/* if !spd.isRunning() && isTimestampOlderThan(time.Now().Format(time.RFC3339), spd.getTimestamp(), 30) {
-					pi.removeShadowPod(spd)
-					continue
-				} */
 			}
 
+			// Ciclo su tutti i shadow pods registrati in cache
 			for _, shadowPodDescription := range pi.getAllShadowPodDescription() {
 				if _, ok := spMap[shadowPodDescription.getUID()]; !shadowPodDescription.isRunning() && !ok {
 					pi.removeShadowPod(shadowPodDescription)
@@ -131,21 +109,23 @@ func (spv *shadowPodValidator) refreshCache(ctx context.Context, c client.Client
 
 		// Check if there are new resource offers in the system snapshot
 		if len(spv.PeeringCache.peeringInfo) < len(resourceOfferList.Items) {
-			for _, ro := range resourceOfferList.Items {
+			for i := range resourceOfferList.Items {
+				ro := &resourceOfferList.Items[i]
 				ClusterID := ro.Labels["discovery.liqo.io/cluster-id"]
 				if ClusterID == "" {
 					return fmt.Errorf("resource offer %s has no cluster id", ro.Name)
 				}
 				if _, found := spv.PeeringCache.getPeeringFromCache(ClusterID); !found {
-					newPI := createPeeringInfo(ClusterID, getQuotaFromResourceOffer(&ro))
+					newPI := createPeeringInfo(ClusterID, getQuotaFromResourceOffer(ro))
 					// Get the List of shadow pods running on the cluster
 					if err := c.List(ctx, &shadowPodList, &client.ListOptions{
 						LabelSelector: labels.SelectorFromSet(map[string]string{"virtualkubelet.liqo.io/origin": ClusterID}),
 					}); err != nil {
 						return err
 					}
-					for _, shadowPod := range shadowPodList.Items {
-						newPI.addShadowPod(createShadowPodDescription(string(shadowPod.GetUID()), getQuotaFromShadowPod(&shadowPod)))
+					for i := range shadowPodList.Items {
+						shadowPod := &shadowPodList.Items[i]
+						newPI.addShadowPod(createShadowPodDescription(string(shadowPod.GetUID()), getQuotaFromShadowPod(shadowPod)))
 					}
 					spv.PeeringCache.addPeeringToCache(ClusterID, newPI)
 				}
