@@ -16,7 +16,6 @@ package resourceValidator
 
 import (
 	"fmt"
-	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -75,7 +74,7 @@ func getQuotaFromShadowPod(shadowpod *vkv1alpha1.ShadowPod) v1.ResourceList {
 }
 
 // This Function compares 2 timestamps to see if the second one is older than the first one of more than a given value of seconds.
-func isTimestampOlderThan(timestamp1, timestamp2 string, seconds int) bool {
+/* func isTimestampOlderThan(timestamp1, timestamp2 string, seconds int) bool {
 	t1, err := time.Parse(time.RFC3339, timestamp1)
 	if err != nil {
 		cachelog.Error(err, "Error parsing timestamp", "timestamp", timestamp1)
@@ -91,7 +90,7 @@ func isTimestampOlderThan(timestamp1, timestamp2 string, seconds int) bool {
 		return true
 	}
 	return false
-}
+} */
 
 /* func filterResourceOffer(list []sharing.ResourceOffer, ClusterID string) *sharing.ResourceOffer {
 	for _, resourceoffer := range list {
