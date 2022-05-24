@@ -30,8 +30,10 @@ var cachelog = logf.Log.WithName("[ webhook-cache ]")
 var shadowpodlog = logf.Log.WithName("[ shadowpod-resource ]")
 var webhooklog = logf.Log.WithName("[ webhook ]")
 var resourceofferlog = logf.Log.WithName("[ resourceoffer-resource ]")
+var webhookrefreshlog = logf.Log.WithName("[ webhook-refresh ]")
 
-func (spv *shadowPodValidator) DecodeShadowPod(obj runtime.RawExtension) (shadowpod *vkv1alpha1.ShadowPod, err error) {
+// DecodeShadowPod decodes a shadow pod from a given runtime object.
+func (spv *ShadowPodValidator) DecodeShadowPod(obj runtime.RawExtension) (shadowpod *vkv1alpha1.ShadowPod, err error) {
 	shadowpod = &vkv1alpha1.ShadowPod{}
 	err = spv.decoder.DecodeRaw(obj, shadowpod)
 	return

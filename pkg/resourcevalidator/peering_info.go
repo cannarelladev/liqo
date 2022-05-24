@@ -125,35 +125,25 @@ func createPeeringInfo(clusterID string, resources v1.ResourceList) *peeringInfo
 }
 
 func (pi *peeringInfo) addShadowPod(spd ShadowPodDescription) {
-	pi.Lock()
 	pi.SPList[spd.UID] = spd
 	pi.subtractResources(spd.Quota)
-	pi.Unlock()
 }
 
 func (pi *peeringInfo) terminateShadowPod(spd ShadowPodDescription) {
-	pi.Lock()
 	spd.terminate()
 	pi.SPList[spd.UID] = spd
 	pi.addResources(spd.Quota)
-	pi.Unlock()
 }
 
 func (pi *peeringInfo) removeShadowPod(spd ShadowPodDescription) {
-	pi.Lock()
 	delete(pi.SPList, spd.UID)
-	pi.Unlock()
 }
 
 func (pi *peeringInfo) updateShadowPod(spd ShadowPodDescription) {
-	pi.Lock()
 	pi.SPList[spd.UID] = spd
-	pi.Unlock()
 }
 
 func (pi *peeringInfo) getShadowPodDescription(uid string) (ShadowPodDescription, bool) {
-	pi.Lock()
-	defer pi.Unlock()
 	spd, ok := pi.SPList[uid]
 	return spd, ok
 }
