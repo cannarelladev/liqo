@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package resourceValidator
+// Package resourcevalidator contains the validating webhook logic and the cache of peering information.
+package resourcevalidator
 
 import (
 	"context"
@@ -49,11 +50,13 @@ func NewShadowPodValidator(c client.Client) *ShadowPodValidator {
 func (spv *ShadowPodValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	webhooklog.Info(fmt.Sprintf("\t\tOperation: %s", req.Operation))
 
+	dryRun := *req.DryRun
+
 	switch req.Operation {
 	case admissionv1.Create:
-		return spv.HandleCreate(ctx, req)
+		return spv.HandleCreate(ctx, req, dryRun)
 	case admissionv1.Delete:
-		return spv.HandleDelete(ctx, req)
+		return spv.HandleDelete(ctx, req, dryRun)
 	default:
 		return admission.Denied("Unsupported operation")
 	}
@@ -67,7 +70,7 @@ func (spv *ShadowPodValidator) InjectDecoder(d *admission.Decoder) error {
 
 // HandleCreate is the function in charge of handling Creation requests.
 //nolint:gocritic // the signature of this method is imposed by controller runtime.
-func (spv *ShadowPodValidator) HandleCreate(ctx context.Context, req admission.Request) admission.Response {
+func (spv *ShadowPodValidator) HandleCreate(ctx context.Context, req admission.Request, dryRun bool) admission.Response {
 	// Decode the shadow pod
 	shadowpod, decodeErr := spv.DecodeShadowPod(req.Object)
 	if decodeErr != nil {
@@ -82,7 +85,7 @@ func (spv *ShadowPodValidator) HandleCreate(ctx context.Context, req admission.R
 
 	spQuota := getQuotaFromShadowPod(shadowpod)
 
-	shadowpodlog.Info(fmt.Sprintf("\tShadowPod %s decoded: UID: %s - ClusterID %s", shadowpod.Name, shadowpod.GetUID(), clusterID))
+	shadowpodlog.Info(fmt.Sprintf("\tShadowPod %s decoded: UID: %s - clusterID %s", shadowpod.Name, shadowpod.GetUID(), clusterID))
 
 	// Check existence and get resource offer by Cluster ID label
 	resourceoffer, err := spv.getResourceOfferByLabel(ctx, clusterID)
@@ -94,7 +97,7 @@ func (spv *ShadowPodValidator) HandleCreate(ctx context.Context, req admission.R
 	// Get ResourceOffer Quota
 	roQuota := getQuotaFromResourceOffer(resourceoffer)
 
-	resourceofferlog.Info(fmt.Sprintf("ResourceOffer founded for ClusterID %s with %s ", clusterID, quotaFormatter(roQuota, "Quota")))
+	resourceofferlog.Info(fmt.Sprintf("ResourceOffer founded for clusterID %s with %s ", clusterID, quotaFormatter(roQuota, "Quota")))
 
 	peeringInfo := getOrCreatePeeringInfo(spv.PeeringCache, clusterID, roQuota)
 
@@ -108,7 +111,7 @@ func (spv *ShadowPodValidator) HandleCreate(ctx context.Context, req admission.R
 
 	shadowpodlog.Info(quotaFormatter(spd.getQuota(), "\tShadowPod resource limits"))
 
-	err = peeringInfo.testAndUpdatePeeringInfo(spd, admissionv1.Create)
+	err = peeringInfo.testAndUpdatePeeringInfo(spd, admissionv1.Create, dryRun)
 	if err != nil {
 		return admission.Denied(err.Error())
 	}
@@ -120,7 +123,7 @@ func (spv *ShadowPodValidator) HandleCreate(ctx context.Context, req admission.R
 
 // HandleDelete is the function in charge of handling Deletion requests.
 //nolint:gocritic // the signature of this method is imposed by controller runtime.
-func (spv *ShadowPodValidator) HandleDelete(ctx context.Context, req admission.Request) admission.Response {
+func (spv *ShadowPodValidator) HandleDelete(ctx context.Context, req admission.Request, dryRun bool) admission.Response {
 	shadowpod, decodeErr := spv.DecodeShadowPod(req.OldObject)
 	if decodeErr != nil {
 		return admission.Errored(http.StatusBadRequest, decodeErr)
@@ -139,12 +142,12 @@ func (spv *ShadowPodValidator) HandleDelete(ctx context.Context, req admission.R
 
 	roQuota := getQuotaFromResourceOffer(resourceoffer)
 
-	resourceofferlog.Info(fmt.Sprintf("ResourceOffer founded for ClusterID %s with %s ", clusterID, quotaFormatter(roQuota, "Quota")))
+	resourceofferlog.Info(fmt.Sprintf("ResourceOffer founded for clusterID %s with %s ", clusterID, quotaFormatter(roQuota, "Quota")))
 
 	peeringInfo, foundPI := spv.PeeringCache.getPeeringFromCache(clusterID)
 	if !foundPI {
 		// TODO: has to be an error alert, because it should never happen
-		webhooklog.Info(fmt.Sprintf("PeeringInfo not found for ClusterID %s", clusterID))
+		webhooklog.Info(fmt.Sprintf("PeeringInfo not found for clusterID %s", clusterID))
 		peeringInfo = createPeeringInfo(clusterID, roQuota)
 		spv.PeeringCache.addPeeringToCache(clusterID, peeringInfo)
 		//return admission.Allowed("allowed")
@@ -157,11 +160,11 @@ func (spv *ShadowPodValidator) HandleDelete(ctx context.Context, req admission.R
 		if foundPI {
 			spd.terminate()
 			peeringInfo.updateShadowPod(spd)
-			return admission.Errored(http.StatusBadRequest, fmt.Errorf("Cannot delete: ShadowPod %s not found (Maybe Cache problem)", shadowpod.Name))
+			return admission.Errored(http.StatusBadRequest, fmt.Errorf("cannot delete: ShadowPod %s not found (Maybe Cache problem)", shadowpod.GetUID()))
 		}
 	}
 
-	err = peeringInfo.testAndUpdatePeeringInfo(spd, admissionv1.Delete)
+	err = peeringInfo.testAndUpdatePeeringInfo(spd, admissionv1.Delete, dryRun)
 	if err != nil {
 		return admission.Denied(err.Error())
 	}

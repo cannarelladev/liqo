@@ -32,7 +32,7 @@ import (
 
 	sharing "github.com/liqotech/liqo/apis/sharing/v1alpha1"
 	vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
-	resourceValidator "github.com/liqotech/liqo/pkg/resourcevalidator"
+	resourcevalidator "github.com/liqotech/liqo/pkg/resourcevalidator"
 )
 
 var (
@@ -75,7 +75,7 @@ func main() {
 		LeaderElectionID:       "93a27183.cnndev.io",
 	})
 
-	spv := resourceValidator.NewShadowPodValidator(mgr.GetClient())
+	spv := resourcevalidator.NewShadowPodValidator(mgr.GetClient())
 	mgr.GetWebhookServer().Register("/validate-shadowpod", &webhook.Admission{Handler: spv})
 
 	if err != nil {
@@ -98,7 +98,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := mgr.Add(manager.RunnableFunc(resourceValidator.RefreshTimer(spv))); err != nil {
+	if err := mgr.Add(manager.RunnableFunc(resourcevalidator.RefreshTimer(spv))); err != nil {
 		setupLog.Error(err, "unable to set up refresh timer")
 		os.Exit(1)
 	}

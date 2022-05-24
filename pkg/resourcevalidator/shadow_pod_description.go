@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package resourceValidator
+package resourcevalidator
 
 import (
 	"time"
@@ -48,10 +48,6 @@ func (spd ShadowPodDescription) isRunning() bool {
 
 func (spd ShadowPodDescription) getQuota() v1.ResourceList {
 	return spd.Quota
-}
-
-func (spd ShadowPodDescription) getTimestamp() string {
-	return spd.timestamp
 }
 
 func (spd ShadowPodDescription) getUID() string {

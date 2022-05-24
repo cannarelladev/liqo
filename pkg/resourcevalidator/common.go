@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package resourceValidator
+package resourcevalidator
 
 import (
+	"context"
 	"fmt"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	sharing "github.com/liqotech/liqo/apis/sharing/v1alpha1"
@@ -75,6 +78,14 @@ func getQuotaFromShadowPod(shadowpod *vkv1alpha1.ShadowPod) v1.ResourceList {
 	return resources
 }
 
+func (spv *ShadowPodValidator) getShadowPodListByClusterID(ctx context.Context, shadowPodList *vkv1alpha1.ShadowPodList, clusterID string) error {
+	c := spv.Client
+	err := c.List(ctx, shadowPodList, &client.ListOptions{
+		LabelSelector: labels.SelectorFromSet(map[string]string{"virtualkubelet.liqo.io/origin": clusterID}),
+	})
+	return err
+}
+
 // This Function compares 2 timestamps to see if the second one is older than the first one of more than a given value of seconds.
 /* func isTimestampOlderThan(timestamp1, timestamp2 string, seconds int) bool {
 	t1, err := time.Parse(time.RFC3339, timestamp1)
@@ -94,9 +105,9 @@ func getQuotaFromShadowPod(shadowpod *vkv1alpha1.ShadowPod) v1.ResourceList {
 	return false
 } */
 
-/* func filterResourceOffer(list []sharing.ResourceOffer, ClusterID string) *sharing.ResourceOffer {
+/* func filterResourceOffer(list []sharing.ResourceOffer, clusterID string) *sharing.ResourceOffer {
 	for _, resourceoffer := range list {
-		if resourceoffer.Labels["discovery.liqo.io/cluster-id"] == ClusterID {
+		if resourceoffer.Labels["discovery.liqo.io/cluster-id"] == clusterID {
 			return &resourceoffer
 		}
 	}
