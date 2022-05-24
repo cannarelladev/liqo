@@ -37,7 +37,7 @@ func createShadowPodDescription(uid string, resources v1.ResourceList) ShadowPod
 	}
 }
 
-func (spd ShadowPodDescription) terminate() {
+func (spd *ShadowPodDescription) terminate() {
 	spd.running = false
 	spd.timestamp = time.Now().Format(time.RFC3339)
 }

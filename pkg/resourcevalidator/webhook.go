@@ -29,22 +29,24 @@ import (
 	sharing "github.com/liqotech/liqo/apis/sharing/v1alpha1"
 )
 
-type shadowPodValidator struct {
+// ShadowPodValidator is the handler used by the Validating Webhook to validate shadow pods.
+type ShadowPodValidator struct {
 	Client       client.Client
 	PeeringCache *peeringCache
 	decoder      *admission.Decoder
 }
 
 // NewShadowPodValidator creates a new shadow pod validator.
-func NewShadowPodValidator(c client.Client) admission.Handler {
-	return &shadowPodValidator{
+func NewShadowPodValidator(c client.Client) *ShadowPodValidator {
+	return &ShadowPodValidator{
 		Client:       c,
 		PeeringCache: &peeringCache{map[string]*peeringInfo{}, false},
 	}
 }
 
-//nolint:gocritic // the signature of this method is imposed by controller runtime.
-func (spv *shadowPodValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
+// Handle is the funcion in charge of handling the request.
+// nolint:gocritic // the signature of this method is imposed by controller runtime.
+func (spv *ShadowPodValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	webhooklog.Info(fmt.Sprintf("\t\tOperation: %s", req.Operation))
 
 	switch req.Operation {
@@ -58,13 +60,14 @@ func (spv *shadowPodValidator) Handle(ctx context.Context, req admission.Request
 }
 
 // InjectDecoder injects the decoder.
-func (spv *shadowPodValidator) InjectDecoder(d *admission.Decoder) error {
+func (spv *ShadowPodValidator) InjectDecoder(d *admission.Decoder) error {
 	spv.decoder = d
 	return nil
 }
 
+// HandleCreate is the function in charge of handling Creation requests.
 //nolint:gocritic // the signature of this method is imposed by controller runtime.
-func (spv *shadowPodValidator) HandleCreate(ctx context.Context, req admission.Request) admission.Response {
+func (spv *ShadowPodValidator) HandleCreate(ctx context.Context, req admission.Request) admission.Response {
 	// Decode the shadow pod
 	shadowpod, decodeErr := spv.DecodeShadowPod(req.Object)
 	if decodeErr != nil {
@@ -115,8 +118,9 @@ func (spv *shadowPodValidator) HandleCreate(ctx context.Context, req admission.R
 	return admission.Allowed("allowed")
 }
 
+// HandleDelete is the function in charge of handling Deletion requests.
 //nolint:gocritic // the signature of this method is imposed by controller runtime.
-func (spv *shadowPodValidator) HandleDelete(ctx context.Context, req admission.Request) admission.Response {
+func (spv *ShadowPodValidator) HandleDelete(ctx context.Context, req admission.Request) admission.Response {
 	shadowpod, decodeErr := spv.DecodeShadowPod(req.OldObject)
 	if decodeErr != nil {
 		return admission.Errored(http.StatusBadRequest, decodeErr)
@@ -167,7 +171,7 @@ func (spv *shadowPodValidator) HandleDelete(ctx context.Context, req admission.R
 	return admission.Allowed("allowed")
 }
 
-func (spv *shadowPodValidator) getResourceOfferByLabel(ctx context.Context, label string) (*sharing.ResourceOffer, error) {
+func (spv *ShadowPodValidator) getResourceOfferByLabel(ctx context.Context, label string) (*sharing.ResourceOffer, error) {
 	resourceofferList := &sharing.ResourceOfferList{}
 	if err := spv.Client.
 		List(ctx, resourceofferList, &client.ListOptions{
