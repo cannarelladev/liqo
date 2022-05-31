@@ -19,7 +19,6 @@ import (
 	"fmt"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -51,29 +50,27 @@ func quotaFormatter(quota v1.ResourceList, quotaName string) string {
 	return result
 }
 
-func generateQuotaPattern(quota v1.ResourceList) v1.ResourceList {
+/* func generateQuotaPattern(quota v1.ResourceList) v1.ResourceList {
 	quantity := resource.NewQuantity(0, resource.DecimalSI)
 	result := v1.ResourceList{}
 	for k := range quota {
 		result[k] = quantity.DeepCopy()
 	}
 	return result
-}
+} */
 
 func getQuotaFromResourceOffer(resourceoffer *sharing.ResourceOffer) v1.ResourceList {
-	resources := v1.ResourceList{
-		v1.ResourceCPU:     *resourceoffer.Spec.ResourceQuota.Hard.Cpu(),
-		v1.ResourceMemory:  *resourceoffer.Spec.ResourceQuota.Hard.Memory(),
-		v1.ResourceStorage: *resourceoffer.Spec.ResourceQuota.Hard.Storage(),
+	resources := v1.ResourceList{}
+	for key, value := range resourceoffer.Spec.ResourceQuota.Hard {
+		resources[key] = value
 	}
 	return resources
 }
 
 func getQuotaFromShadowPod(shadowpod *vkv1alpha1.ShadowPod) v1.ResourceList {
-	resources := v1.ResourceList{
-		v1.ResourceCPU:     *shadowpod.Spec.Pod.Containers[0].Resources.Limits.Cpu(),
-		v1.ResourceMemory:  *shadowpod.Spec.Pod.Containers[0].Resources.Limits.Memory(),
-		v1.ResourceStorage: *shadowpod.Spec.Pod.Containers[0].Resources.Limits.Storage(),
+	resources := v1.ResourceList{}
+	for key, value := range shadowpod.Spec.Pod.Containers[0].Resources.Limits {
+		resources[key] = value
 	}
 	return resources
 }
