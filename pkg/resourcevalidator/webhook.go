@@ -30,6 +30,12 @@ import (
 	sharing "github.com/liqotech/liqo/apis/sharing/v1alpha1"
 )
 
+// Manifests
+// cache data semplication
+// refactoring resource check with iteration on the map
+// flag on controller manager
+// readiness probe
+
 // ShadowPodValidator is the handler used by the Validating Webhook to validate shadow pods.
 type ShadowPodValidator struct {
 	Client       client.Client

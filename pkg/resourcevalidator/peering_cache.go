@@ -110,7 +110,7 @@ func (spv *ShadowPodValidator) refreshCache(ctx context.Context) (done bool, err
 			}
 
 			webhookrefreshlog.Info("[ REFRESH ] Found " + fmt.Sprintf("%d", len(shadowPodList.Items)) + " ShadowPods for clusterID: " + clusterID)
-			// Check su tutti gli ShadowPods del cluster
+			// Check on all cluster ShadowPods
 			checkShadowPods(&shadowPodList, pi, spMap)
 
 			webhookrefreshlog.Info("[ REFRESH ] Searching for terminated ShadowPodDescription to be removed from cache")
@@ -219,14 +219,17 @@ func checkAlignmentResourceOfferPeeringInfo(ctx context.Context, spv *ShadowPodV
 
 	// Check if PeeringInfos still have corresponding ResourceOffers
 	for i := range peeringInfoList {
-		clusterID := peeringInfoList[i].getClusterID()
+		peeringInfo := peeringInfoList[i]
+		clusterID := peeringInfo.getClusterID()
 		foundRO := false
 
-		// Check if the corresponding ResourceOffer is still present in the system snapshot
+		// Check if the corresponding ResourceOffer is still present in the system snapshot and there are some updates
 		for j := range resourceOfferList.Items {
 			ro := &resourceOfferList.Items[j]
 			if clusterID == ro.Labels["discovery.liqo.io/cluster-id"] {
 				foundRO = true
+				webhookrefreshlog.Info("[ REFRESH ] Checking for some ResourceOffer Quota updates")
+				resourceOfferUpdates(ro, peeringInfo)
 				break
 			}
 		}
@@ -238,4 +241,20 @@ func checkAlignmentResourceOfferPeeringInfo(ctx context.Context, spv *ShadowPodV
 		}
 	}
 	return nil
+}
+
+func resourceOfferUpdates(ro *sharing.ResourceOffer, pi *peeringInfo) {
+	quota := pi.getQuota()
+	isUpdated := false
+	for key, value := range ro.Spec.ResourceQuota.Hard {
+		if value != quota[key] {
+			isUpdated = true
+			break
+		}
+	}
+	if isUpdated {
+		newQuota := getQuotaFromResourceOffer(ro)
+		pi.updatePeeringQuota(newQuota)
+		webhookrefreshlog.Info("[ REFRESH ] Quota of PeeringInfo " + pi.getClusterID() + "has been updated")
+	}
 }
