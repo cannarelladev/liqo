@@ -42,7 +42,6 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
 	utilruntime.Must(vkv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(sharing.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
@@ -93,7 +92,13 @@ func main() {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
+
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		setupLog.Error(err, "unable to set up ready check")
+		os.Exit(1)
+	}
+
+	if err := mgr.AddReadyzCheck("readyz", resourcevalidator.Probe); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
