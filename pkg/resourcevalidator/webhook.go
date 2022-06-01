@@ -47,7 +47,7 @@ type ShadowPodValidator struct {
 func NewShadowPodValidator(c client.Client) *ShadowPodValidator {
 	return &ShadowPodValidator{
 		Client:       c,
-		PeeringCache: &peeringCache{map[string]*peeringInfo{}, false},
+		PeeringCache: &peeringCache{map[string]*peeringInfo{}},
 	}
 }
 

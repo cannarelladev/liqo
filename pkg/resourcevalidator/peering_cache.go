@@ -17,6 +17,7 @@ package resourcevalidator
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -26,14 +27,25 @@ import (
 	vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
 )
 
+var (
+	ready = false
+)
+
 type peeringCache struct {
 	peeringInfo map[string]*peeringInfo
-	init        bool
 }
 
 /**
  * PeeringCache methods
  */
+
+// Probe checks if the webhook cache is Ready.
+func Probe(req *http.Request) error {
+	if ready {
+		return nil
+	}
+	return fmt.Errorf("webhook cache not yet configured")
+}
 
 func (pc *peeringCache) getAllPeeringInfo() map[string]*peeringInfo {
 	return pc.peeringInfo
@@ -65,10 +77,9 @@ func (spv *ShadowPodValidator) refreshCache(ctx context.Context) (done bool, err
 	if err := c.List(ctx, &resourceOfferList, &client.ListOptions{}); err != nil {
 		return true, err
 	}
-	if !spv.PeeringCache.init {
+	if !ready {
 		webhookrefreshlog.Info("----------------------------------------------------")
 		webhookrefreshlog.Info("[ INITIALIZATION ] Cache initialization started")
-		spv.PeeringCache.init = true
 		for i := range resourceOfferList.Items {
 			ro := &resourceOfferList.Items[i]
 			clusterID := ro.Labels["discovery.liqo.io/cluster-id"]
@@ -94,6 +105,7 @@ func (spv *ShadowPodValidator) refreshCache(ctx context.Context) (done bool, err
 		}
 		webhookrefreshlog.Info("[ INITIALIZATION ] Cache initialization complete")
 		webhookrefreshlog.Info("----------------------------------------------------")
+		ready = true
 	} else {
 		webhookrefreshlog.Info("----------------------------------------------------")
 		webhookrefreshlog.Info("[ REFRESH ] Cache refresh started")
@@ -229,7 +241,9 @@ func checkAlignmentResourceOfferPeeringInfo(ctx context.Context, spv *ShadowPodV
 			if clusterID == ro.Labels["discovery.liqo.io/cluster-id"] {
 				foundRO = true
 				webhookrefreshlog.Info("[ REFRESH ] Checking for some ResourceOffer Quota updates")
+				peeringInfo.Lock()
 				resourceOfferUpdates(ro, peeringInfo)
+				peeringInfo.Unlock()
 				break
 			}
 		}
