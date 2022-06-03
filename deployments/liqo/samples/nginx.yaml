@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: nginx
+  name: nginx2
   namespace: liqo-test
   annotations: 
     shadowpod-webhook: allowed
@@ -14,7 +14,7 @@ spec:
     imagePullPolicy: IfNotPresent
     resources:
       limits:
-        memory: "6000000000"
+        memory: "2000000000"
         cpu: "1000m"
       requests:
         memory: "40Mi"

@@ -268,7 +268,20 @@ func resourceOfferUpdates(ro *sharing.ResourceOffer, pi *peeringInfo) {
 	}
 	if isUpdated {
 		newQuota := getQuotaFromResourceOffer(ro)
+		spdList := pi.getAllShadowPodDescription()
+		newFreeQuota := newQuota.DeepCopy()
+		for _, spd := range spdList {
+			for key, val := range spd.getQuota() {
+				if prevFree, ok := newFreeQuota[key]; ok {
+					prevFree.Sub(val)
+					pi.FreePeeringQuota[key] = prevFree
+				} else {
+					pi.FreePeeringQuota[key] = val.DeepCopy()
+				}
+			}
+		}
 		pi.updatePeeringQuota(newQuota)
+		pi.updateFreePeeringQuota(newFreeQuota)
 		webhookrefreshlog.Info("[ REFRESH ] Quota of PeeringInfo " + pi.getClusterID() + "has been updated")
 	}
 }
