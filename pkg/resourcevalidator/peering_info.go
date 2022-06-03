@@ -116,7 +116,15 @@ func (pi *peeringInfo) getClusterID() string {
 }
 
 func (pi *peeringInfo) updatePeeringQuota(resources v1.ResourceList) {
+	webhookrefreshlog.Info(quotaFormatter(pi.PeeringQuota, "\t\tOld Peering Quota %s"))
 	pi.PeeringQuota = resources.DeepCopy()
+	webhookrefreshlog.Info(quotaFormatter(pi.PeeringQuota, "\t\tNew Peering Quota %s"))
+}
+
+func (pi *peeringInfo) updateFreePeeringQuota(resources v1.ResourceList) {
+	webhookrefreshlog.Info(quotaFormatter(pi.FreePeeringQuota, "\t\tOld Free Quota %s"))
+	pi.FreePeeringQuota = resources.DeepCopy()
+	webhookrefreshlog.Info(quotaFormatter(pi.FreePeeringQuota, "\t\tNew Free Quota %s"))
 }
 
 func (pi *peeringInfo) addShadowPod(spd ShadowPodDescription) {
@@ -151,7 +159,6 @@ func (pi *peeringInfo) getUsedQuota() v1.ResourceList {
 		tmpQuota.Sub(FreeQuota[key])
 		UsedQuota[key] = tmpQuota
 	}
-	cachelog.Info(quotaFormatter(UsedQuota, "\tPeeringInfo UsedQuota"))
 	return UsedQuota
 }
 
@@ -171,7 +178,6 @@ func (pi *peeringInfo) getAllShadowPodDescription() map[string]ShadowPodDescript
 func (pi *peeringInfo) testAndUpdatePeeringInfo(spd ShadowPodDescription, operation admissionv1.Operation, dryRun bool) error {
 	cachelog.Info(fmt.Sprintf("\tOperation: %s", operation))
 	pi.Lock()
-	defer pi.Unlock()
 	cachelog.Info(quotaFormatter(spd.getQuota(), "\tShadowPodQuota"))
 	cachelog.Info(quotaFormatter(pi.getQuota(), "\tPeeringInfo Quota"))
 	cachelog.Info(quotaFormatter(pi.getUsedQuota(), "\tPeeringInfo UsedQuota"))
@@ -180,6 +186,7 @@ func (pi *peeringInfo) testAndUpdatePeeringInfo(spd ShadowPodDescription, operat
 	switch operation {
 	case admissionv1.Create:
 		if err := pi.checkResources(spd); err != nil {
+			pi.Unlock()
 			return err
 		}
 		if !dryRun {
@@ -188,6 +195,7 @@ func (pi *peeringInfo) testAndUpdatePeeringInfo(spd ShadowPodDescription, operat
 		cachelog.Info(quotaFormatter(pi.PeeringQuota, "\tUpdated PeeringInfo Quota"))
 		cachelog.Info(quotaFormatter(pi.getUsedQuota(), "\tUpdated PeeringInfo UsedQuota"))
 		cachelog.Info(quotaFormatter(pi.FreePeeringQuota, "\tUpdated PeeringInfo FreeQuota"))
+		pi.Unlock()
 		return nil
 	case admissionv1.Delete:
 		if !dryRun {
@@ -196,8 +204,10 @@ func (pi *peeringInfo) testAndUpdatePeeringInfo(spd ShadowPodDescription, operat
 		cachelog.Info(quotaFormatter(pi.PeeringQuota, "\tUpdated PeeringInfo Quota"))
 		cachelog.Info(quotaFormatter(pi.getUsedQuota(), "\tUpdated PeeringInfo UsedQuota"))
 		cachelog.Info(quotaFormatter(pi.FreePeeringQuota, "\tUpdated PeeringInfo FreeQuota"))
+		pi.Unlock()
 		return nil
 	default:
+		pi.Unlock()
 		return fmt.Errorf("PEERING INFO: operation not supported")
 	}
 }
@@ -206,17 +216,17 @@ func (pi *peeringInfo) checkResources(spd ShadowPodDescription) error {
 	cpuFlag := false
 	memoryFlag := false
 	for key, val := range spd.getQuota() {
-		if quota, ok := pi.PeeringQuota[key]; ok {
+		if freeQuota, ok := pi.FreePeeringQuota[key]; ok {
 			if key == v1.ResourceCPU {
 				cpuFlag = true
 			}
 			if key == v1.ResourceMemory {
 				memoryFlag = true
 			}
-			if quota.Value() < val.Value() {
+			if freeQuota.Value() < val.Value() {
 				err := fmt.Errorf("PEERING INFO: %s quota usage exceeded - FREE %s / REQUESTED %s",
 					key,
-					quota.String(),
+					freeQuota.String(),
 					val.String())
 				cachelog.Info(err.Error())
 				return err

@@ -103,7 +103,7 @@ func (spv *ShadowPodValidator) HandleCreate(ctx context.Context, req admission.R
 	// Get ResourceOffer Quota
 	roQuota := getQuotaFromResourceOffer(resourceoffer)
 
-	resourceofferlog.Info(fmt.Sprintf("ResourceOffer founded for clusterID %s with %s ", clusterID, quotaFormatter(roQuota, "Quota")))
+	resourceofferlog.Info(fmt.Sprintf("ResourceOffer found for clusterID %s with %s ", clusterID, quotaFormatter(roQuota, "Quota")))
 
 	peeringInfo := getOrCreatePeeringInfo(spv.PeeringCache, clusterID, roQuota)
 
@@ -148,7 +148,7 @@ func (spv *ShadowPodValidator) HandleDelete(ctx context.Context, req admission.R
 
 	roQuota := getQuotaFromResourceOffer(resourceoffer)
 
-	resourceofferlog.Info(fmt.Sprintf("ResourceOffer founded for clusterID %s with %s ", clusterID, quotaFormatter(roQuota, "Quota")))
+	resourceofferlog.Info(fmt.Sprintf("ResourceOffer found for clusterID %s with %s ", clusterID, quotaFormatter(roQuota, "Quota")))
 
 	peeringInfo, foundPI := spv.PeeringCache.getPeeringFromCache(clusterID)
 	if !foundPI {

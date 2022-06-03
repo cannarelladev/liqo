@@ -17,6 +17,7 @@ package resourcevalidator
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -43,8 +44,11 @@ func (spv *ShadowPodValidator) DecodeShadowPod(obj runtime.RawExtension) (shadow
 
 func quotaFormatter(quota v1.ResourceList, quotaName string) string {
 	result := fmt.Sprintf("%s [ ", quotaName)
+	r := regexp.MustCompile("^hugepages-")
 	for k, v := range quota {
-		result += fmt.Sprintf("%s: %s, ", k, v.String())
+		if res := r.MatchString(k.String()); !res {
+			result += fmt.Sprintf("%s: %s, ", k, v.String())
+		}
 	}
 	result += "]"
 	return result
