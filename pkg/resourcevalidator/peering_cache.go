@@ -86,7 +86,7 @@ func (spv *ShadowPodValidator) refreshCache(ctx context.Context) (done bool, err
 			if clusterID == "" {
 				return true, fmt.Errorf("ResourceOffer %s has no cluster id", ro.Name)
 			}
-			webhookrefreshlog.Info(fmt.Sprintf("[ INITIALIZATION ] Generating PeeringInfo in cache for corresponding ResourceOffer %s", ro.Name))
+			webhookrefreshlog.Info(fmt.Sprintf("[ INITIALIZATION ] Generating PeeringInfo in cache for corresponding ResourceOffer %s", clusterID))
 			pi := createPeeringInfo(clusterID, getQuotaFromResourceOffer(ro))
 
 			pi.Lock()
@@ -154,10 +154,10 @@ func RefreshTimer(spv *ShadowPodValidator) func(ctx context.Context) error {
 func alignShadowPods(shadowPodList *vkv1alpha1.ShadowPodList, pi *peeringInfo) {
 	for i := range shadowPodList.Items {
 		shadowPod := &shadowPodList.Items[i]
-		_, found := pi.getShadowPodDescription(string(shadowPod.GetUID()))
+		_, found := pi.getShadowPodDescription(shadowPod.GetName())
 		if !found {
-			pi.addShadowPod(createShadowPodDescription(string(shadowPod.GetUID()), getQuotaFromShadowPod(shadowPod)))
-			webhookrefreshlog.Info("[ INITIALIZATION ] ShadowPod " + string(shadowPod.GetUID()) + " added in cache")
+			pi.addShadowPod(createShadowPodDescription(shadowPod.GetName(), string(shadowPod.GetUID()), getQuotaFromShadowPod(shadowPod)))
+			webhookrefreshlog.Info("[ INITIALIZATION ] ShadowPod " + shadowPod.GetName() + " added in cache")
 		}
 	}
 }
@@ -165,21 +165,21 @@ func alignShadowPods(shadowPodList *vkv1alpha1.ShadowPodList, pi *peeringInfo) {
 func checkShadowPods(shadowPodList *vkv1alpha1.ShadowPodList, pi *peeringInfo, spMap map[string]string) {
 	for i := range shadowPodList.Items {
 		shadowPod := &shadowPodList.Items[i]
-		_, found := pi.getShadowPodDescription(string(shadowPod.GetUID()))
+		_, found := pi.getShadowPodDescription(shadowPod.GetName())
 		if !found {
-			webhookrefreshlog.Info(fmt.Sprintf("[ REFRESH ] ShadowPod %s not found in cache", shadowPod.GetUID()))
+			webhookrefreshlog.Info(fmt.Sprintf("[ REFRESH ] ShadowPod %s not found in cache", shadowPod.GetName()))
 			// TODO: this should never happen, but maybe we need to manage also this case better
 			continue
 		}
-		spMap[string(shadowPod.GetUID())] = string(shadowPod.GetUID())
+		spMap[shadowPod.GetName()] = shadowPod.GetName()
 	}
 }
 
 func alignShadowPodDescriptions(pi *peeringInfo, spMap map[string]string) {
 	for _, shadowPodDescription := range pi.getAllShadowPodDescription() {
-		if _, ok := spMap[shadowPodDescription.getUID()]; !shadowPodDescription.isRunning() && !ok {
+		if _, ok := spMap[shadowPodDescription.getName()]; !shadowPodDescription.isRunning() && !ok {
 			pi.removeShadowPod(shadowPodDescription)
-			webhookrefreshlog.Info("[ REFRESH ] ShadowPodDescription " + shadowPodDescription.getUID() + " removed from cache")
+			webhookrefreshlog.Info("[ REFRESH ] ShadowPodDescription " + shadowPodDescription.getName() + " removed from cache")
 		}
 	}
 }
@@ -220,7 +220,7 @@ func checkAlignmentResourceOfferPeeringInfo(ctx context.Context, spv *ShadowPodV
 			for i := range shadowPodList.Items {
 				shadowPod := &shadowPodList.Items[i]
 				// Add the ShadowPodDescription to the PeeringInfo
-				newPI.addShadowPod(createShadowPodDescription(string(shadowPod.GetUID()), getQuotaFromShadowPod(shadowPod)))
+				newPI.addShadowPod(createShadowPodDescription(shadowPod.GetName(), string(shadowPod.GetUID()), getQuotaFromShadowPod(shadowPod)))
 			}
 			newPI.Unlock()
 
@@ -274,14 +274,14 @@ func resourceOfferUpdates(ro *sharing.ResourceOffer, pi *peeringInfo) {
 			for key, val := range spd.getQuota() {
 				if prevFree, ok := newFreeQuota[key]; ok {
 					prevFree.Sub(val)
-					pi.FreePeeringQuota[key] = prevFree
+					newFreeQuota[key] = prevFree
 				} else {
-					pi.FreePeeringQuota[key] = val.DeepCopy()
+					newFreeQuota[key] = val.DeepCopy()
 				}
 			}
 		}
+		webhookrefreshlog.Info("[ REFRESH ] Quota of PeeringInfo " + pi.getClusterID() + " has been updated")
 		pi.updatePeeringQuota(newQuota)
 		pi.updateFreePeeringQuota(newFreeQuota)
-		webhookrefreshlog.Info("[ REFRESH ] Quota of PeeringInfo " + pi.getClusterID() + "has been updated")
 	}
 }

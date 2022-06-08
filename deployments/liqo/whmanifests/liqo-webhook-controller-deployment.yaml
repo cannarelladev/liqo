@@ -41,7 +41,7 @@ spec:
         - --health-probe-bind-address=:8081
         - --metrics-bind-address=127.0.0.1:8080
         - --leader-elect
-        image: cannarelladev/shadowpod-validationwebhook:v1
+        image: cannarelladev/shadowpod-validationwebhook:v1.2
         imagePullPolicy: Always
         livenessProbe:
           httpGet:

@@ -22,12 +22,15 @@ import (
 	"net/http"
 
 	admissionv1 "k8s.io/api/admission/v1"
+	v1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	sharing "github.com/liqotech/liqo/apis/sharing/v1alpha1"
+	vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
 )
 
 // Manifests
@@ -57,12 +60,44 @@ func (spv *ShadowPodValidator) Handle(ctx context.Context, req admission.Request
 	webhooklog.Info(fmt.Sprintf("\t\tOperation: %s", req.Operation))
 
 	dryRun := *req.DryRun
+	var obj runtime.RawExtension
 
 	switch req.Operation {
 	case admissionv1.Create:
-		return spv.HandleCreate(ctx, req, dryRun)
+		obj = req.Object
 	case admissionv1.Delete:
-		return spv.HandleDelete(ctx, req, dryRun)
+		obj = req.OldObject
+	default:
+		return admission.Errored(http.StatusBadRequest, fmt.Errorf("unsupported operation %s", req.Operation))
+	}
+
+	// Decode the shadow pod
+	shadowpod, decodeErr := spv.DecodeShadowPod(obj)
+	if decodeErr != nil {
+		return admission.Errored(http.StatusBadRequest, decodeErr)
+	}
+
+	// Check existence and get shadow pod origin Cluster ID label
+	clusterID, found := shadowpod.Labels["virtualkubelet.liqo.io/origin"]
+	if !found {
+		return admission.Denied("missing origin Cluster ID label")
+	}
+
+	ns := &v1.Namespace{}
+	if err := spv.Client.Get(ctx, client.ObjectKey{Name: shadowpod.GetNamespace()}, ns); err != nil {
+		return admission.Errored(http.StatusBadRequest, err)
+	}
+
+	nsClusterID, found := ns.Labels["liqo.io/remote-cluster-id"]
+	if !found || nsClusterID != clusterID {
+		return admission.Denied("Namespace Cluster ID label does not match with the ShadowPod Cluster ID or does not exist")
+	}
+
+	switch req.Operation {
+	case admissionv1.Create:
+		return spv.HandleCreate(ctx, req, shadowpod, clusterID, dryRun)
+	case admissionv1.Delete:
+		return spv.HandleDelete(ctx, req, shadowpod, clusterID, dryRun)
 	default:
 		return admission.Denied("Unsupported operation")
 	}
@@ -76,19 +111,8 @@ func (spv *ShadowPodValidator) InjectDecoder(d *admission.Decoder) error {
 
 // HandleCreate is the function in charge of handling Creation requests.
 //nolint:gocritic // the signature of this method is imposed by controller runtime.
-func (spv *ShadowPodValidator) HandleCreate(ctx context.Context, req admission.Request, dryRun bool) admission.Response {
-	// Decode the shadow pod
-	shadowpod, decodeErr := spv.DecodeShadowPod(req.Object)
-	if decodeErr != nil {
-		return admission.Errored(http.StatusBadRequest, decodeErr)
-	}
-
-	// Check existence and get shadow pod origin Cluster ID label
-	clusterID, found := shadowpod.Labels["virtualkubelet.liqo.io/origin"]
-	if !found {
-		return admission.Denied("missing origin Cluster ID label")
-	}
-
+func (spv *ShadowPodValidator) HandleCreate(ctx context.Context, req admission.Request, shadowpod *vkv1alpha1.ShadowPod,
+	clusterID string, dryRun bool) admission.Response {
 	spQuota := getQuotaFromShadowPod(shadowpod)
 
 	shadowpodlog.Info(fmt.Sprintf("\tShadowPod %s decoded: UID: %s - clusterID %s", shadowpod.Name, shadowpod.GetUID(), clusterID))
@@ -107,10 +131,10 @@ func (spv *ShadowPodValidator) HandleCreate(ctx context.Context, req admission.R
 
 	peeringInfo := getOrCreatePeeringInfo(spv.PeeringCache, clusterID, roQuota)
 
-	spd, found := peeringInfo.getShadowPodDescription(string(shadowpod.GetUID()))
+	spd, found := peeringInfo.getShadowPodDescription(shadowpod.GetName())
 	if !found {
 		// Create a new ShadowPodDescription for caching purposes
-		spd = createShadowPodDescription(string(shadowpod.GetUID()), spQuota)
+		spd = createShadowPodDescription(shadowpod.GetName(), string(shadowpod.GetUID()), spQuota)
 	} else if spd.running {
 		return admission.Denied("Cannot create: ShadowPod is already up and running")
 	}
@@ -129,17 +153,8 @@ func (spv *ShadowPodValidator) HandleCreate(ctx context.Context, req admission.R
 
 // HandleDelete is the function in charge of handling Deletion requests.
 //nolint:gocritic // the signature of this method is imposed by controller runtime.
-func (spv *ShadowPodValidator) HandleDelete(ctx context.Context, req admission.Request, dryRun bool) admission.Response {
-	shadowpod, decodeErr := spv.DecodeShadowPod(req.OldObject)
-	if decodeErr != nil {
-		return admission.Errored(http.StatusBadRequest, decodeErr)
-	}
-
-	clusterID, found := shadowpod.Labels["virtualkubelet.liqo.io/origin"]
-	if !found {
-		return admission.Denied("missing origin Cluster ID label")
-	}
-
+func (spv *ShadowPodValidator) HandleDelete(ctx context.Context, req admission.Request, shadowpod *vkv1alpha1.ShadowPod,
+	clusterID string, dryRun bool) admission.Response {
 	resourceoffer, err := spv.getResourceOfferByLabel(ctx, clusterID)
 	if err != nil {
 		// TODO: to be improved
@@ -159,14 +174,20 @@ func (spv *ShadowPodValidator) HandleDelete(ctx context.Context, req admission.R
 		//return admission.Allowed("allowed")
 	}
 
-	spd, foundSPD := peeringInfo.getShadowPodDescription(string(shadowpod.GetUID()))
+	spd, foundSPD := peeringInfo.getShadowPodDescription(shadowpod.GetName())
+	check := spd.getUID() == string(shadowpod.GetUID())
+
 	if !foundSPD {
-		spd = createShadowPodDescription(string(shadowpod.GetUID()), getQuotaFromShadowPod(shadowpod))
+		spd = createShadowPodDescription(shadowpod.GetName(), string(shadowpod.GetUID()), getQuotaFromShadowPod(shadowpod))
 		// TODO: to be improved/checked. not at all convinced that this is the right way to do it
 		if foundPI {
 			spd.terminate()
 			peeringInfo.updateShadowPod(spd)
-			return admission.Errored(http.StatusBadRequest, fmt.Errorf("cannot delete: ShadowPod %s not found (Maybe Cache problem)", shadowpod.GetUID()))
+			return admission.Errored(http.StatusBadRequest, fmt.Errorf("cannot delete: ShadowPod %s not found (Maybe Cache problem)", shadowpod.GetName()))
+		}
+	} else {
+		if !check {
+			return admission.Errored(http.StatusBadRequest, fmt.Errorf("ShadowPod %s: UID mismatch", shadowpod.GetName()))
 		}
 	}
 
