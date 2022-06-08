@@ -22,14 +22,16 @@ import (
 
 // ShadowPodDescription is a struct that contains the main informations about a shadow pod.
 type ShadowPodDescription struct {
+	Name      string
 	UID       string
 	Quota     v1.ResourceList
 	timestamp string
 	running   bool
 }
 
-func createShadowPodDescription(uid string, resources v1.ResourceList) ShadowPodDescription {
+func createShadowPodDescription(name, uid string, resources v1.ResourceList) ShadowPodDescription {
 	return ShadowPodDescription{
+		Name:      name,
 		UID:       uid,
 		Quota:     resources.DeepCopy(),
 		timestamp: time.Now().Format(time.RFC3339),
@@ -52,4 +54,8 @@ func (spd ShadowPodDescription) getQuota() v1.ResourceList {
 
 func (spd ShadowPodDescription) getUID() string {
 	return spd.UID
+}
+
+func (spd ShadowPodDescription) getName() string {
+	return spd.Name
 }

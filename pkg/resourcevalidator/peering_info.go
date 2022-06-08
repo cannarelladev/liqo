@@ -128,22 +128,22 @@ func (pi *peeringInfo) updateFreePeeringQuota(resources v1.ResourceList) {
 }
 
 func (pi *peeringInfo) addShadowPod(spd ShadowPodDescription) {
-	pi.SPList[spd.UID] = spd
+	pi.SPList[spd.getName()] = spd
 	pi.subtractResources(spd.Quota)
 }
 
 func (pi *peeringInfo) terminateShadowPod(spd ShadowPodDescription) {
 	spd.terminate()
-	pi.SPList[spd.UID] = spd
+	pi.SPList[spd.getName()] = spd
 	pi.addResources(spd.Quota)
 }
 
 func (pi *peeringInfo) removeShadowPod(spd ShadowPodDescription) {
-	delete(pi.SPList, spd.UID)
+	delete(pi.SPList, spd.getName())
 }
 
 func (pi *peeringInfo) updateShadowPod(spd ShadowPodDescription) {
-	pi.SPList[spd.UID] = spd
+	pi.SPList[spd.getName()] = spd
 }
 
 func (pi *peeringInfo) getQuota() v1.ResourceList {
@@ -238,7 +238,7 @@ func (pi *peeringInfo) checkResources(spd ShadowPodDescription) error {
 		}
 	}
 	if !cpuFlag || !memoryFlag {
-		err := fmt.Errorf("PEERING INFO: Peering CPU or Memory quota not correctly defined for the ShadowPod %s", spd.getUID())
+		err := fmt.Errorf("PEERING INFO: Peering CPU or Memory quota not correctly defined for the ShadowPod %s", spd.getName())
 		cachelog.Info(err.Error())
 		return err
 	}
