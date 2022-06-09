@@ -25,8 +25,10 @@ import (
 
 	sharing "github.com/liqotech/liqo/apis/sharing/v1alpha1"
 	vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
+	"github.com/liqotech/liqo/pkg/discovery"
 )
 
+// move inside the peeringcache.
 var (
 	ready = false
 )
@@ -64,10 +66,6 @@ func (pc *peeringCache) deletePeeringFromCache(clusterID string) {
 	delete(pc.peeringInfo, clusterID)
 }
 
-func (pc *peeringCache) updatePeeringInCache(clusterID string, pi *peeringInfo) {
-	pc.peeringInfo[clusterID] = pi
-}
-
 // TODO: refresh has to be an update and not a new cache generation.
 func (spv *ShadowPodValidator) refreshCache(ctx context.Context) (done bool, err error) {
 	webhookrefreshlog.Info("[ REFRESH ] Refreshing peering cache")
@@ -82,7 +80,7 @@ func (spv *ShadowPodValidator) refreshCache(ctx context.Context) (done bool, err
 		webhookrefreshlog.Info("[ INITIALIZATION ] Cache initialization started")
 		for i := range resourceOfferList.Items {
 			ro := &resourceOfferList.Items[i]
-			clusterID := ro.Labels["discovery.liqo.io/cluster-id"]
+			clusterID := ro.Labels[discovery.ClusterIDLabel]
 			if clusterID == "" {
 				return true, fmt.Errorf("ResourceOffer %s has no cluster id", ro.Name)
 			}
@@ -200,7 +198,7 @@ func checkAlignmentResourceOfferPeeringInfo(ctx context.Context, spv *ShadowPodV
 	// Check if there are new ResourceOffers in the system snapshot
 	for i := range resourceOfferList.Items {
 		ro := &resourceOfferList.Items[i]
-		clusterID := ro.Labels["discovery.liqo.io/cluster-id"]
+		clusterID := ro.Labels[discovery.ClusterIDLabel]
 		if clusterID == "" {
 			return fmt.Errorf("ResourceOffer %s has no cluster id", ro.Name)
 		}
@@ -238,7 +236,7 @@ func checkAlignmentResourceOfferPeeringInfo(ctx context.Context, spv *ShadowPodV
 		// Check if the corresponding ResourceOffer is still present in the system snapshot and there are some updates
 		for j := range resourceOfferList.Items {
 			ro := &resourceOfferList.Items[j]
-			if clusterID == ro.Labels["discovery.liqo.io/cluster-id"] {
+			if clusterID == ro.Labels[discovery.ClusterIDLabel] {
 				foundRO = true
 				webhookrefreshlog.Info("[ REFRESH ] Checking for some ResourceOffer Quota updates")
 				peeringInfo.Lock()

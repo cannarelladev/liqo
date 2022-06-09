@@ -22,22 +22,21 @@ import (
 	"net/http"
 
 	admissionv1 "k8s.io/api/admission/v1"
-	v1 "k8s.io/api/core/v1"
-	kerrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/labels"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	sharing "github.com/liqotech/liqo/apis/sharing/v1alpha1"
 	vkv1alpha1 "github.com/liqotech/liqo/apis/virtualkubelet/v1alpha1"
+	"github.com/liqotech/liqo/pkg/consts"
+	liqogetters "github.com/liqotech/liqo/pkg/utils/getters"
+	liqolabels "github.com/liqotech/liqo/pkg/utils/labels"
+	"github.com/liqotech/liqo/pkg/virtualKubelet/forge"
 )
 
 // Manifests
-// cache data semplication
-// refactoring resource check with iteration on the map
 // flag on controller manager
-// readiness probe
 
 // ShadowPodValidator is the handler used by the Validating Webhook to validate shadow pods.
 type ShadowPodValidator struct {
@@ -59,7 +58,6 @@ func NewShadowPodValidator(c client.Client) *ShadowPodValidator {
 func (spv *ShadowPodValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	webhooklog.Info(fmt.Sprintf("\t\tOperation: %s", req.Operation))
 
-	dryRun := *req.DryRun
 	var obj runtime.RawExtension
 
 	switch req.Operation {
@@ -72,41 +70,38 @@ func (spv *ShadowPodValidator) Handle(ctx context.Context, req admission.Request
 	}
 
 	// Decode the shadow pod
-	shadowpod, decodeErr := spv.DecodeShadowPod(obj)
-	if decodeErr != nil {
-		return admission.Errored(http.StatusBadRequest, decodeErr)
+	shadowpod, err := spv.DecodeShadowPod(obj)
+	if err != nil {
+		return admission.Errored(http.StatusBadRequest, err)
 	}
 
 	// Check existence and get shadow pod origin Cluster ID label
-	clusterID, found := shadowpod.Labels["virtualkubelet.liqo.io/origin"]
+	spClusterID, found := shadowpod.Labels[forge.LiqoOriginClusterIDKey]
 	if !found {
 		return admission.Denied("missing origin Cluster ID label")
 	}
 
-	ns := &v1.Namespace{}
-	if err := spv.Client.Get(ctx, client.ObjectKey{Name: shadowpod.GetNamespace()}, ns); err != nil {
+	// Get ShadowPod Namespace
+	namespace := &corev1.Namespace{}
+	if err := spv.Client.Get(ctx, client.ObjectKey{Name: shadowpod.GetNamespace()}, namespace); err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
-	nsClusterID, found := ns.Labels["liqo.io/remote-cluster-id"]
-	if !found || nsClusterID != clusterID {
-		return admission.Denied("Namespace Cluster ID label does not match with the ShadowPod Cluster ID or does not exist")
+	// Get Cluster ID origin label of the namespace
+	nsClusterID, found := namespace.Labels[consts.RemoteClusterID]
+	if !found || nsClusterID != spClusterID {
+		webhooklog.Info(fmt.Sprintf("\t\tNamespace Cluster ID [ %s ] does not match the ShadowPod Cluster ID [ %s ]", nsClusterID, spClusterID))
+		return admission.Denied("Namespace Cluster ID label does not match the ShadowPod Cluster ID label")
 	}
 
 	switch req.Operation {
 	case admissionv1.Create:
-		return spv.HandleCreate(ctx, req, shadowpod, clusterID, dryRun)
+		return spv.HandleCreate(ctx, req, shadowpod, nsClusterID, pointer.BoolDeref(req.DryRun, false))
 	case admissionv1.Delete:
-		return spv.HandleDelete(ctx, req, shadowpod, clusterID, dryRun)
+		return spv.HandleDelete(ctx, req, shadowpod, nsClusterID, pointer.BoolDeref(req.DryRun, false))
 	default:
 		return admission.Denied("Unsupported operation")
 	}
-}
-
-// InjectDecoder injects the decoder.
-func (spv *ShadowPodValidator) InjectDecoder(d *admission.Decoder) error {
-	spv.decoder = d
-	return nil
 }
 
 // HandleCreate is the function in charge of handling Creation requests.
@@ -118,10 +113,14 @@ func (spv *ShadowPodValidator) HandleCreate(ctx context.Context, req admission.R
 	shadowpodlog.Info(fmt.Sprintf("\tShadowPod %s decoded: UID: %s - clusterID %s", shadowpod.Name, shadowpod.GetUID(), clusterID))
 
 	// Check existence and get resource offer by Cluster ID label
-	resourceoffer, err := spv.getResourceOfferByLabel(ctx, clusterID)
+
+	resourceoffer, err := liqogetters.GetResourceOfferByLabel(ctx, spv.Client, corev1.NamespaceAll,
+		liqolabels.LocalLabelSelector(clusterID))
+	//resourceoffer, err := spv.getResourceOfferByLabel(ctx, clusterID)
 	if err != nil {
-		// TODO: to be improved
-		return admission.Errored(http.StatusBadRequest, err)
+		error := fmt.Errorf("error getting resource offer by label: %w", err)
+		resourceofferlog.Info(error.Error())
+		return admission.Errored(http.StatusInternalServerError, error)
 	}
 
 	// Get ResourceOffer Quota
@@ -136,7 +135,7 @@ func (spv *ShadowPodValidator) HandleCreate(ctx context.Context, req admission.R
 		// Create a new ShadowPodDescription for caching purposes
 		spd = createShadowPodDescription(shadowpod.GetName(), string(shadowpod.GetUID()), spQuota)
 	} else if spd.running {
-		return admission.Denied("Cannot create: ShadowPod is already up and running")
+		return admission.Denied("ShadowPod already exists")
 	}
 
 	shadowpodlog.Info(quotaFormatter(spd.getQuota(), "\tShadowPod resource limits"))
@@ -146,32 +145,30 @@ func (spv *ShadowPodValidator) HandleCreate(ctx context.Context, req admission.R
 		return admission.Denied(err.Error())
 	}
 
-	spv.PeeringCache.updatePeeringInCache(clusterID, peeringInfo)
-
-	return admission.Allowed("allowed")
+	return admission.Allowed("")
 }
 
 // HandleDelete is the function in charge of handling Deletion requests.
 //nolint:gocritic // the signature of this method is imposed by controller runtime.
 func (spv *ShadowPodValidator) HandleDelete(ctx context.Context, req admission.Request, shadowpod *vkv1alpha1.ShadowPod,
 	clusterID string, dryRun bool) admission.Response {
-	resourceoffer, err := spv.getResourceOfferByLabel(ctx, clusterID)
-	if err != nil {
-		// TODO: to be improved
-		return admission.Errored(http.StatusBadRequest, err)
-	}
-
-	roQuota := getQuotaFromResourceOffer(resourceoffer)
-
-	resourceofferlog.Info(fmt.Sprintf("ResourceOffer found for clusterID %s with %s ", clusterID, quotaFormatter(roQuota, "Quota")))
-
 	peeringInfo, foundPI := spv.PeeringCache.getPeeringFromCache(clusterID)
 	if !foundPI {
-		// TODO: has to be an error alert, because it should never happen
-		webhooklog.Info(fmt.Sprintf("PeeringInfo not found for clusterID %s", clusterID))
+		webhooklog.Info(fmt.Sprintf("PeeringInfo not found for clusterID %s. Creating...", clusterID))
+
+		resourceoffer, err := liqogetters.GetResourceOfferByLabel(ctx, spv.Client, corev1.NamespaceAll,
+			liqolabels.LocalLabelSelector(clusterID))
+		//resourceoffer, err := spv.getResourceOfferByLabel(ctx, clusterID)
+		if err != nil {
+			error := fmt.Errorf("error getting resource offer by label: %w", err)
+			resourceofferlog.Info(error.Error())
+			return admission.Errored(http.StatusInternalServerError, error)
+		}
+		roQuota := getQuotaFromResourceOffer(resourceoffer)
+		resourceofferlog.Info(fmt.Sprintf("ResourceOffer found for clusterID %s with %s ", clusterID, quotaFormatter(roQuota, "Quota")))
+
 		peeringInfo = createPeeringInfo(clusterID, roQuota)
 		spv.PeeringCache.addPeeringToCache(clusterID, peeringInfo)
-		//return admission.Allowed("allowed")
 	}
 
 	spd, foundSPD := peeringInfo.getShadowPodDescription(shadowpod.GetName())
@@ -179,49 +176,33 @@ func (spv *ShadowPodValidator) HandleDelete(ctx context.Context, req admission.R
 
 	if !foundSPD {
 		spd = createShadowPodDescription(shadowpod.GetName(), string(shadowpod.GetUID()), getQuotaFromShadowPod(shadowpod))
-		// TODO: to be improved/checked. not at all convinced that this is the right way to do it
 		if foundPI {
 			spd.terminate()
+			peeringInfo.Lock()
 			peeringInfo.updateShadowPod(spd)
-			return admission.Errored(http.StatusBadRequest, fmt.Errorf("cannot delete: ShadowPod %s not found (Maybe Cache problem)", shadowpod.GetName()))
+			peeringInfo.Unlock()
+			error := fmt.Errorf("cannot delete: ShadowPod %s not found (Maybe Cache problem)", shadowpod.GetName())
+			webhooklog.Info(error.Error())
+			return admission.Errored(http.StatusBadRequest, error)
 		}
 	} else {
 		if !check {
-			return admission.Errored(http.StatusBadRequest, fmt.Errorf("ShadowPod %s: UID mismatch", shadowpod.GetName()))
+			error := fmt.Errorf("ShadowPod %s: UID mismatch", shadowpod.GetName())
+			webhooklog.Info(error.Error())
+			return admission.Errored(http.StatusBadRequest, error)
 		}
 	}
 
-	err = peeringInfo.testAndUpdatePeeringInfo(spd, admissionv1.Delete, dryRun)
-	if err != nil {
+	if err := peeringInfo.testAndUpdatePeeringInfo(spd, admissionv1.Delete, dryRun); err != nil {
+		cachelog.Info(err.Error())
 		return admission.Denied(err.Error())
 	}
 
-	spv.PeeringCache.updatePeeringInCache(clusterID, peeringInfo)
-
-	return admission.Allowed("allowed")
+	return admission.Allowed("")
 }
 
-func (spv *ShadowPodValidator) getResourceOfferByLabel(ctx context.Context, label string) (*sharing.ResourceOffer, error) {
-	resourceofferList := &sharing.ResourceOfferList{}
-	if err := spv.Client.
-		List(ctx, resourceofferList, &client.ListOptions{
-			LabelSelector: labels.SelectorFromSet(map[string]string{"discovery.liqo.io/cluster-id": label}),
-		}); err != nil {
-		return nil, err
-	}
-
-	switch len(resourceofferList.Items) {
-	case 0:
-		return nil, kerrors.NewNotFound(sharing.ResourceOfferGroupResource, label)
-	case 1:
-		return &resourceofferList.Items[0], nil
-	default:
-		return nil, fmt.Errorf("multiple resource offers found with matching label %s", label)
-	}
+// InjectDecoder injects the decoder.
+func (spv *ShadowPodValidator) InjectDecoder(d *admission.Decoder) error {
+	spv.decoder = d
+	return nil
 }
-
-// checkValidShadowPod checks if the shadow pod is valid.
-/* func checkValidShadowPod(pi *peeringInfo, spd ShadowPodDescription, roQuota v1.ResourceList, clusterID string) admission.Response {
-
-	return admission.Allowed("allowed")
-} */
