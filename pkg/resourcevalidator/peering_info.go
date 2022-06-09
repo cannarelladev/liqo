@@ -224,23 +224,17 @@ func (pi *peeringInfo) checkResources(spd ShadowPodDescription) error {
 				memoryFlag = true
 			}
 			if freeQuota.Value() < val.Value() {
-				err := fmt.Errorf("PEERING INFO: %s quota usage exceeded - FREE %s / REQUESTED %s",
+				return fmt.Errorf("PEERING INFO: %s quota usage exceeded - FREE %s / REQUESTED %s",
 					key,
 					freeQuota.String(),
 					val.String())
-				cachelog.Info(err.Error())
-				return err
 			}
 		} else {
-			err := fmt.Errorf("PEERING INFO: Peering %s quota not found in the PeeringInfo", key)
-			cachelog.Info(err.Error())
-			return err
+			return fmt.Errorf("PEERING INFO: Peering %s quota not found in the PeeringInfo", key)
 		}
 	}
 	if !cpuFlag || !memoryFlag {
-		err := fmt.Errorf("PEERING INFO: Peering CPU or Memory quota not correctly defined for the ShadowPod %s", spd.getName())
-		cachelog.Info(err.Error())
-		return err
+		return fmt.Errorf("PEERING INFO: Peering CPU or Memory quota not correctly defined for the ShadowPod %s", spd.getName())
 	}
 	return nil
 }
