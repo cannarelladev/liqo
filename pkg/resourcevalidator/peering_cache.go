@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -34,7 +35,8 @@ var (
 )
 
 type peeringCache struct {
-	peeringInfo map[string]*peeringInfo
+	peeringInfo sync.Map
+	ready       bool
 }
 
 /**
@@ -49,21 +51,35 @@ func Probe(req *http.Request) error {
 	return fmt.Errorf("webhook cache not yet configured")
 }
 
-func (pc *peeringCache) getAllPeeringInfo() map[string]*peeringInfo {
-	return pc.peeringInfo
+/* func getAllPeeringInfoWrapper(cache map[string]*peeringInfo) func(key, value interface{}) bool {
+	return func(key, value interface{}) bool {
+		cache[key.(string)] = value.(*peeringInfo)
+		return true
+	}
 }
 
+func (pc *peeringCache) getAllPeeringInfo() map[string]*peeringInfo {
+	cache := make(map[string]*peeringInfo)
+	pc.peeringInfo.Range(getAllPeeringInfoWrapper(cache))
+	return cache
+} */
+
 func (pc *peeringCache) getPeeringFromCache(clusterID string) (*peeringInfo, bool) {
-	pi, found := pc.peeringInfo[clusterID]
-	return pi, found
+	pi, found := pc.peeringInfo.Load(clusterID)
+	//pi, found := pc.peeringInfo[clusterID]
+	return pi.(*peeringInfo), found
 }
 
 func (pc *peeringCache) addPeeringToCache(clusterID string, pi *peeringInfo) {
-	pc.peeringInfo[clusterID] = pi
+	pc.peeringInfo.Store(clusterID, pi)
 }
 
 func (pc *peeringCache) deletePeeringFromCache(clusterID string) {
-	delete(pc.peeringInfo, clusterID)
+	pc.peeringInfo.Delete(clusterID)
+}
+
+func (pc *peeringCache) getPeeringInfoMap() sync.Map {
+	return pc.peeringInfo
 }
 
 // TODO: refresh has to be an update and not a new cache generation.
@@ -108,7 +124,10 @@ func (spv *ShadowPodValidator) refreshCache(ctx context.Context) (done bool, err
 		webhookrefreshlog.Info("----------------------------------------------------")
 		webhookrefreshlog.Info("[ REFRESH ] Cache refresh started")
 		// Ciclo su tutti i Peering registrati in cache
-		for clusterID, pi := range spv.PeeringCache.getAllPeeringInfo() {
+		spMap := make(map[string]string)
+
+		// OLD VERSION
+		/* for clusterID, pi := range spv.PeeringCache.getAllPeeringInfo() {
 			pi.Lock()
 			webhookrefreshlog.Info("[ REFRESH ] Refreshing PeeringInfo for clusterID: " + clusterID)
 			spMap := make(map[string]string)
@@ -128,7 +147,34 @@ func (spv *ShadowPodValidator) refreshCache(ctx context.Context) (done bool, err
 			alignShadowPodDescriptions(pi, spMap)
 
 			pi.Unlock()
-		}
+		} */
+
+		piMap := spv.PeeringCache.getPeeringInfoMap()
+		piMap.Range(
+			func(key, value interface{}) bool {
+				pi := value.(*peeringInfo)
+				clusterID := key.(string)
+				pi.Lock()
+				webhookrefreshlog.Info("[ REFRESH ] Refreshing PeeringInfo for clusterID: " + clusterID)
+
+				// Get the List of shadow pods running on the cluster
+				if err := spv.getShadowPodListByClusterID(ctx, &shadowPodList, clusterID); err != nil {
+					pi.Unlock()
+					return true
+				}
+
+				webhookrefreshlog.Info("[ REFRESH ] Found " + fmt.Sprintf("%d", len(shadowPodList.Items)) + " ShadowPods for clusterID: " + clusterID)
+				// Check on all cluster ShadowPods
+				checkShadowPods(&shadowPodList, pi, spMap)
+
+				webhookrefreshlog.Info("[ REFRESH ] Searching for terminated ShadowPodDescription to be removed from cache")
+				// Alignment of all ShadowPodDescriptions in cache
+				alignShadowPodDescriptions(pi, spMap)
+
+				pi.Unlock()
+				return true
+			},
+		)
 
 		webhookrefreshlog.Info("[ REFRESH ] Cache refresh completed")
 		webhookrefreshlog.Info("[ REFRESH ] ResourceOffers - PeeringInfo alignment check started")
@@ -192,9 +238,6 @@ func checkAlignmentResourceOfferPeeringInfo(ctx context.Context, spv *ShadowPodV
 		return err
 	}
 
-	// Get the List of existing PeeringInfo
-	peeringInfoList := spv.PeeringCache.getAllPeeringInfo()
-
 	// Check if there are new ResourceOffers in the system snapshot
 	for i := range resourceOfferList.Items {
 		ro := &resourceOfferList.Items[i]
@@ -204,7 +247,7 @@ func checkAlignmentResourceOfferPeeringInfo(ctx context.Context, spv *ShadowPodV
 		}
 
 		// Check if the ResourceOffer is not present in the cache
-		if _, found := peeringInfoList[clusterID]; !found {
+		if _, found := spv.PeeringCache.peeringInfo.Load(clusterID); !found {
 			webhookrefreshlog.Info("[ REFRESH ] ResourceOffer " + ro.Name + " not found in cache, adding it")
 			newPI := createPeeringInfo(clusterID, getQuotaFromResourceOffer(ro))
 			newPI.Lock()
@@ -227,8 +270,8 @@ func checkAlignmentResourceOfferPeeringInfo(ctx context.Context, spv *ShadowPodV
 		}
 	}
 
-	// Check if PeeringInfos still have corresponding ResourceOffers
-	for i := range peeringInfoList {
+	// OLD VERSION
+	/* for i := range peeringInfoList {
 		peeringInfo := peeringInfoList[i]
 		clusterID := peeringInfo.getClusterID()
 		foundRO := false
@@ -251,7 +294,38 @@ func checkAlignmentResourceOfferPeeringInfo(ctx context.Context, spv *ShadowPodV
 			webhookrefreshlog.Info("[ REFRESH ] ResourceOffer " + clusterID + " not found in system snapshot, removing it from cache")
 			spv.PeeringCache.deletePeeringFromCache(clusterID)
 		}
-	}
+	} */
+
+	// Check if PeeringInfos still have corresponding ResourceOffers
+	piMap := spv.PeeringCache.getPeeringInfoMap()
+	piMap.Range(
+		func(key, value interface{}) bool {
+			peeringInfo := value.(*peeringInfo)
+			clusterID := key.(string)
+			foundRO := false
+
+			// Check if the corresponding ResourceOffer is still present in the system snapshot and there are some updates
+			for j := range resourceOfferList.Items {
+				ro := &resourceOfferList.Items[j]
+				if clusterID == ro.Labels[discovery.ClusterIDLabel] {
+					foundRO = true
+					webhookrefreshlog.Info("[ REFRESH ] Checking for some ResourceOffer Quota updates")
+					peeringInfo.Lock()
+					resourceOfferUpdates(ro, peeringInfo)
+					peeringInfo.Unlock()
+					break
+				}
+			}
+
+			// If the corresponding ResourceOffer is not present anymore, remove the PeeringInfo from the cache
+			if !foundRO {
+				webhookrefreshlog.Info("[ REFRESH ] ResourceOffer " + clusterID + " not found in system snapshot, removing it from cache")
+				spv.PeeringCache.deletePeeringFromCache(clusterID)
+			}
+			return true
+		},
+	)
+
 	return nil
 }
 

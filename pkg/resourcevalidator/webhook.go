@@ -49,7 +49,7 @@ type ShadowPodValidator struct {
 func NewShadowPodValidator(c client.Client) *ShadowPodValidator {
 	return &ShadowPodValidator{
 		Client:       c,
-		PeeringCache: &peeringCache{map[string]*peeringInfo{}},
+		PeeringCache: &peeringCache{ready: false},
 	}
 }
 
@@ -185,12 +185,10 @@ func (spv *ShadowPodValidator) HandleDelete(ctx context.Context, req admission.R
 			webhooklog.Info(error.Error())
 			return admission.Errored(http.StatusBadRequest, error)
 		}
-	} else {
-		if !check {
-			error := fmt.Errorf("ShadowPod %s: UID mismatch", shadowpod.GetName())
-			webhooklog.Info(error.Error())
-			return admission.Errored(http.StatusBadRequest, error)
-		}
+	} else if !check {
+		error := fmt.Errorf("ShadowPod %s: UID mismatch", shadowpod.GetName())
+		webhooklog.Info(error.Error())
+		return admission.Errored(http.StatusBadRequest, error)
 	}
 
 	if err := peeringInfo.testAndUpdatePeeringInfo(spd, admissionv1.Delete, dryRun); err != nil {
