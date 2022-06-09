@@ -32,6 +32,7 @@ import (
 	"github.com/liqotech/liqo/pkg/consts"
 	liqogetters "github.com/liqotech/liqo/pkg/utils/getters"
 	liqolabels "github.com/liqotech/liqo/pkg/utils/labels"
+	pod "github.com/liqotech/liqo/pkg/utils/pod"
 	"github.com/liqotech/liqo/pkg/virtualKubelet/forge"
 )
 
@@ -49,7 +50,7 @@ type ShadowPodValidator struct {
 func NewShadowPodValidator(c client.Client) *ShadowPodValidator {
 	return &ShadowPodValidator{
 		Client:       c,
-		PeeringCache: &peeringCache{map[string]*peeringInfo{}},
+		PeeringCache: &peeringCache{ready: false},
 	}
 }
 
@@ -58,6 +59,11 @@ func NewShadowPodValidator(c client.Client) *ShadowPodValidator {
 func (spv *ShadowPodValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	webhooklog.Info(fmt.Sprintf("\t\tOperation: %s", req.Operation))
 
+	if !spv.PeeringCache.ready {
+		webhooklog.Info("PeeringCache not ready")
+		return admission.Errored(http.StatusInternalServerError, fmt.Errorf("PeeringCache not ready"))
+	}
+
 	var obj runtime.RawExtension
 
 	switch req.Operation {
@@ -65,6 +71,8 @@ func (spv *ShadowPodValidator) Handle(ctx context.Context, req admission.Request
 		obj = req.Object
 	case admissionv1.Delete:
 		obj = req.OldObject
+	case admissionv1.Update:
+		return spv.HandleUpdate(req)
 	default:
 		return admission.Errored(http.StatusBadRequest, fmt.Errorf("unsupported operation %s", req.Operation))
 	}
@@ -148,6 +156,21 @@ func (spv *ShadowPodValidator) HandleCreate(ctx context.Context, req admission.R
 	return admission.Allowed("")
 }
 
+// HandleUpdate is the function in charge of handling Update requests.
+func (spv *ShadowPodValidator) HandleUpdate(req admission.Request) admission.Response {
+	obj := req.Object
+	oldObj := req.OldObject
+	shadowpod, err := spv.DecodeShadowPod(obj)
+	oldShadowpod, oldErr := spv.DecodeShadowPod(oldObj)
+	if err != nil || oldErr != nil {
+		return admission.Errored(http.StatusBadRequest, err)
+	}
+	if pod.CheckShadowPodUpdate(&shadowpod.Spec.Pod, &oldShadowpod.Spec.Pod) {
+		return admission.Allowed("")
+	}
+	return admission.Denied("")
+}
+
 // HandleDelete is the function in charge of handling Deletion requests.
 //nolint:gocritic // the signature of this method is imposed by controller runtime.
 func (spv *ShadowPodValidator) HandleDelete(ctx context.Context, req admission.Request, shadowpod *vkv1alpha1.ShadowPod,
@@ -185,12 +208,10 @@ func (spv *ShadowPodValidator) HandleDelete(ctx context.Context, req admission.R
 			webhooklog.Info(error.Error())
 			return admission.Errored(http.StatusBadRequest, error)
 		}
-	} else {
-		if !check {
-			error := fmt.Errorf("ShadowPod %s: UID mismatch", shadowpod.GetName())
-			webhooklog.Info(error.Error())
-			return admission.Errored(http.StatusBadRequest, error)
-		}
+	} else if !check {
+		error := fmt.Errorf("ShadowPod %s: UID mismatch", shadowpod.GetName())
+		webhooklog.Info(error.Error())
+		return admission.Errored(http.StatusBadRequest, error)
 	}
 
 	if err := peeringInfo.testAndUpdatePeeringInfo(spd, admissionv1.Delete, dryRun); err != nil {

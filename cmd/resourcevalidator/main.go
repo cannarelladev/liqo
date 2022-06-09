@@ -94,11 +94,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := mgr.AddReadyzCheck("readyz", resourcevalidator.Probe); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
-		os.Exit(1)
-	}
-
 	if err := mgr.Add(manager.RunnableFunc(resourcevalidator.RefreshTimer(spv))); err != nil {
 		setupLog.Error(err, "unable to set up refresh timer")
 		os.Exit(1)

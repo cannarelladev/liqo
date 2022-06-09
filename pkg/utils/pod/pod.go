@@ -57,8 +57,12 @@ func CheckShadowPodUpdate(previous, updated *corev1.PodSpec) bool {
 	// * spec.initContainers[*].image
 	// * spec.activeDeadlineSeconds
 	// * spec.tolerations (only new entries can be added)
-	updated.Containers = previous.Containers
-	updated.InitContainers = previous.InitContainers
+	for i := range updated.Containers {
+		updated.Containers[i].Image = previous.Containers[i].Image
+	}
+	for i := range updated.InitContainers {
+		updated.InitContainers[i].Image = previous.InitContainers[i].Image
+	}
 	updated.ActiveDeadlineSeconds = previous.ActiveDeadlineSeconds
 	updated.Tolerations = previous.Tolerations
 	return reflect.DeepEqual(previous, updated)
