@@ -65,6 +65,7 @@ func quotaFormatter(quota v1.ResourceList, quotaName string) string {
 
 func getQuotaFromResourceOffer(resourceoffer *sharing.ResourceOffer) v1.ResourceList {
 	resources := v1.ResourceList{}
+
 	for key, value := range resourceoffer.Spec.ResourceQuota.Hard {
 		resources[key] = value
 	}

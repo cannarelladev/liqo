@@ -3,8 +3,6 @@ kind: Pod
 metadata:
   name: nginx2
   namespace: liqo-test
-  annotations: 
-    shadowpod-webhook: allowed
 spec:
   containers:
   - name: nginx

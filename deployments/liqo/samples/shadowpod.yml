@@ -2,8 +2,6 @@ apiVersion: virtualkubelet.liqo.io/v1alpha1
 kind: ShadowPod
 metadata:
   name: shadowpod-sample
-  annotations: 
-    shadowpod-webhook: allowed
   labels:
     virtualkubelet.liqo.io/origin : 5d799ebb-da2a-4a3b-9839-3fbf085efeff
 spec:

@@ -25,6 +25,7 @@ import (
 
 type peeringInfo struct {
 	clusterID        string
+	clusterName      string
 	SPList           map[string]ShadowPodDescription
 	PeeringQuota     v1.ResourceList
 	FreePeeringQuota v1.ResourceList
@@ -61,11 +62,11 @@ func (pi *peeringInfo) start() {
 	pi.Unlock()
 } */
 
-func getOrCreatePeeringInfo(cache *peeringCache, clusterID string, roQuota v1.ResourceList) *peeringInfo {
+func getOrCreatePeeringInfo(cache *peeringCache, clusterID, clusterName string, roQuota v1.ResourceList) *peeringInfo {
 	peeringInfo, found := cache.getPeeringFromCache(clusterID)
 	if !found {
 		webhooklog.Info(fmt.Sprintf("\t\tPeeringInfo not found for clusterID %s", clusterID))
-		peeringInfo = createPeeringInfo(clusterID, roQuota)
+		peeringInfo = createPeeringInfo(clusterID, clusterName, roQuota)
 		webhooklog.Info(fmt.Sprintf("\t\tPeeringInfo created for clusterID %s", clusterID))
 		webhooklog.Info(quotaFormatter(peeringInfo.getQuota(), "\t\tNew PeeringInfo Quota limits"))
 		webhooklog.Info(quotaFormatter(peeringInfo.getUsedQuota(), "\t\tNew PeeringInfo UsedQuota limits"))
@@ -99,9 +100,10 @@ func (pi *peeringInfo) subtractResources(resources v1.ResourceList) {
 	pi.LastUpdateTime = time.Now().Format(time.RFC3339)
 }
 
-func createPeeringInfo(clusterID string, resources v1.ResourceList) *peeringInfo {
+func createPeeringInfo(clusterID, clusterName string, resources v1.ResourceList) *peeringInfo {
 	return &peeringInfo{
 		clusterID:    clusterID,
+		clusterName:  clusterName,
 		SPList:       map[string]ShadowPodDescription{},
 		PeeringQuota: resources.DeepCopy(),
 		//UsedPeeringQuota: generateQuotaPattern(resources),
@@ -113,6 +115,10 @@ func createPeeringInfo(clusterID string, resources v1.ResourceList) *peeringInfo
 
 func (pi *peeringInfo) getClusterID() string {
 	return pi.clusterID
+}
+
+func (pi *peeringInfo) getClusterName() string {
+	return pi.clusterName
 }
 
 func (pi *peeringInfo) updatePeeringQuota(resources v1.ResourceList) {

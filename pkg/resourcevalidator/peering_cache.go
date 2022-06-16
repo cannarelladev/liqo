@@ -77,7 +77,7 @@ func (spv *ShadowPodValidator) refreshCache(ctx context.Context) (done bool, err
 				return true, fmt.Errorf("ResourceOffer %s has no cluster id", ro.Name)
 			}
 			webhookrefreshlog.Info(fmt.Sprintf("[ INITIALIZATION ] Generating PeeringInfo in cache for corresponding ResourceOffer %s", clusterID))
-			pi := createPeeringInfo(clusterID, getQuotaFromResourceOffer(ro))
+			pi := createPeeringInfo(clusterID, ro.OwnerReferences[0].Name, getQuotaFromResourceOffer(ro))
 
 			pi.Lock()
 			// Get the List of shadow pods running on the cluster
@@ -107,7 +107,7 @@ func (spv *ShadowPodValidator) refreshCache(ctx context.Context) (done bool, err
 				pi := value.(*peeringInfo)
 				clusterID := key.(string)
 				pi.Lock()
-				webhookrefreshlog.Info("[ REFRESH ] Refreshing PeeringInfo for clusterID: " + clusterID)
+				webhookrefreshlog.Info("[ REFRESH ] Refreshing PeeringInfo for clusterID: " + clusterID + " [ " + pi.getClusterName() + " ]")
 
 				// Get the List of shadow pods running on the cluster
 				if err := spv.getShadowPodListByClusterID(ctx, &shadowPodList, clusterID); err != nil {
@@ -115,7 +115,7 @@ func (spv *ShadowPodValidator) refreshCache(ctx context.Context) (done bool, err
 					return false
 				}
 
-				webhookrefreshlog.Info("[ REFRESH ] Found " + fmt.Sprintf("%d", len(shadowPodList.Items)) + " ShadowPods for clusterID: " + clusterID)
+				webhookrefreshlog.Info("[ REFRESH ] Found " + fmt.Sprintf("%d", len(shadowPodList.Items)) + " ShadowPods for clusterID: " + clusterID + " [ " + pi.getClusterName() + " ]")
 				// Check on all cluster ShadowPods
 				checkShadowPods(&shadowPodList, pi, spMap)
 
@@ -201,7 +201,7 @@ func checkAlignmentResourceOfferPeeringInfo(ctx context.Context, spv *ShadowPodV
 		// Check if the ResourceOffer is not present in the cache
 		if _, found := spv.PeeringCache.peeringInfo.Load(clusterID); !found {
 			webhookrefreshlog.Info("[ REFRESH ] ResourceOffer " + ro.Name + " not found in cache, adding it")
-			newPI := createPeeringInfo(clusterID, getQuotaFromResourceOffer(ro))
+			newPI := createPeeringInfo(clusterID, ro.OwnerReferences[0].Name, getQuotaFromResourceOffer(ro))
 			newPI.Lock()
 
 			// Get the List of ShadowPods running on the cluster
@@ -277,7 +277,7 @@ func resourceOfferUpdates(ro *sharing.ResourceOffer, pi *peeringInfo) {
 				}
 			}
 		}
-		webhookrefreshlog.Info("[ REFRESH ] Quota of PeeringInfo " + pi.getClusterID() + " has been updated")
+		webhookrefreshlog.Info("[ REFRESH ] Quota of PeeringInfo " + pi.getClusterID() + " [ " + pi.getClusterName() + " ] has been updated")
 		pi.updatePeeringQuota(newQuota)
 		pi.updateFreePeeringQuota(newFreeQuota)
 	}
