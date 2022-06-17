@@ -74,30 +74,8 @@ func main() {
 		LeaderElectionID:       "93a27183.cnndev.io",
 	})
 
-	spv := resourcevalidator.NewShadowPodValidator(mgr.GetClient())
-	mgr.GetWebhookServer().Register("/validate-shadowpod", &webhook.Admission{Handler: spv})
+	
 
-	if err != nil {
-		setupLog.Error(err, "unable to start manager")
-		os.Exit(1)
-	}
-
-	//+kubebuilder:scaffold:builder
-
-	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up health check")
-		os.Exit(1)
-	}
-
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
-		os.Exit(1)
-	}
-
-	if err := mgr.Add(manager.RunnableFunc(resourcevalidator.RefreshTimer(spv))); err != nil {
-		setupLog.Error(err, "unable to set up refresh timer")
-		os.Exit(1)
-	}
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

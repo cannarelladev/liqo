@@ -35,6 +35,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/sig-storage-lib-external-provisioner/v7/controller"
 
 	discoveryv1alpha1 "github.com/liqotech/liqo/apis/discovery/v1alpha1"
@@ -56,6 +58,7 @@ import (
 	nsoffwh "github.com/liqotech/liqo/pkg/liqo-controller-manager/webhooks/namespaceoffloading"
 	podwh "github.com/liqotech/liqo/pkg/liqo-controller-manager/webhooks/pod"
 	peeringroles "github.com/liqotech/liqo/pkg/peering-roles"
+	resourcevalidator "github.com/liqotech/liqo/pkg/resourcevalidator"
 	tenantnamespace "github.com/liqotech/liqo/pkg/tenantNamespace"
 	argsutils "github.com/liqotech/liqo/pkg/utils/args"
 	liqoerrors "github.com/liqotech/liqo/pkg/utils/errors"
@@ -77,7 +80,6 @@ var (
 
 func init() {
 	_ = clientgoscheme.AddToScheme(scheme)
-
 	_ = sharingv1alpha1.AddToScheme(scheme)
 	_ = netv1alpha1.AddToScheme(scheme)
 	_ = discoveryv1alpha1.AddToScheme(scheme)
@@ -202,7 +204,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	spv := resourcevalidator.NewShadowPodValidator(mgr.GetClient())
+
 	// Register the webhooks.
+	mgr.GetWebhookServer().Register("/validate/shadowpods", &webhook.Admission{Handler: spv})
 	mgr.GetWebhookServer().Register("/validate/namespace-offloading", nsoffwh.New())
 	mgr.GetWebhookServer().Register("/mutate/pod", podwh.New(mgr.GetClient()))
 
@@ -341,6 +346,11 @@ func main() {
 
 	if err = mgr.Add(offerUpdater); err != nil {
 		klog.Fatal(err)
+	}
+
+	if err := mgr.Add(manager.RunnableFunc(resourcevalidator.RefreshTimer(spv))); err != nil {
+		klog.Fatal(err, "unable to set up refresh timer")
+		os.Exit(1)
 	}
 
 	if *enableStorage {
